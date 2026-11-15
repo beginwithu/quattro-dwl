@@ -557,22 +557,126 @@ static size_t autostart_len;
 static void reloadconfig(const Arg *arg);
 static int reloadconfigsignal(int signo, void *data);
 
-/* configuration, allows nested code to access above variables */
-#define autostart default_autostart
-#define rules default_rules
-#define monrules default_monrules
-#define keys default_keys
-#define buttons default_buttons
-#define axes default_axes
-#define xkb_rules default_xkb_rules
-#include "config.h"
-#undef autostart
-#undef rules
-#undef monrules
-#undef keys
-#undef buttons
-#undef axes
-#undef xkb_rules
+/* Built-in fallback defaults (overridden at runtime from ~/.config/dwl/config.toml) */
+#define COLOR(hex) { ((hex >> 24) & 0xFF) / 255.0f, \
+                     ((hex >> 16) & 0xFF) / 255.0f, \
+                     ((hex >> 8) & 0xFF) / 255.0f, \
+                     (hex & 0xFF) / 255.0f }
+
+static int sloppyfocus               = 1;
+static int bypass_surface_visibility = 0;
+static int smartgaps                 = 0;
+static int monoclegaps               = 0;
+static unsigned int borderpx         = 2;
+static unsigned int gappih           = 4;
+static unsigned int gappiv           = 4;
+static unsigned int gappoh           = 4;
+static unsigned int gappov           = 4;
+static unsigned int snap             = 32;
+static int adaptive_sync             = 0;
+static float rootcolor[]             = COLOR(0x1a1b26ff);
+static float bordercolor[]           = COLOR(0x414868ff);
+static float focuscolor[]            = COLOR(0x7aa2f7ff);
+static float urgentcolor[]           = COLOR(0xf7768eff);
+static float fullscreen_bg[]         = {0.0f, 0.0f, 0.0f, 1.0f};
+
+#define TAGCOUNT (10)
+
+static int log_level = WLR_ERROR;
+
+static const char *const default_autostart[] = {
+	NULL
+};
+
+static const Rule default_rules[] = {
+	{ "localsend",                NULL,  0,  1,  -1,  0,    0 },
+	{ "org.gnome.baobab",         NULL,  0,  1,  -1,  0,    0 },
+	{ "xdg-desktop-portal-gtk",   NULL,  0,  1,  -1,  0,    0 },
+	{ "imv",                      NULL,  0,  1,  -1,  0,    0 },
+	{ "mpv",                      NULL,  0,  1,  -1,  0,    0 },
+	{ "WebcamOverlay-",           NULL,  0,  1,  -1,  0,    0 },
+	{ "org.quattro.about",        NULL,  0,  1,  -1,  920,  520 },
+	{ "org.quattro.terminal",     NULL,  0,  1,  -1,  875,  600 },
+	{ "quattro-floating",         NULL,  0,  1,  -1,  875,  600 },
+	{ "TUI.float",                NULL,  0,  1,  -1,  875,  600 },
+};
+
+static const Layout layouts[] = {
+	{ "[]=",      dwindle },
+	{ "><>",      NULL },
+	{ "[]=",      tile },
+	{ "[M]",      monocle },
+};
+
+static const MonitorRule default_monrules[] = {
+	{ NULL, 0.55f, 1, 0, 0, 0.0f, 1.0f, &layouts[0], WL_OUTPUT_TRANSFORM_NORMAL, -1, -1 },
+};
+
+static const struct xkb_rule_names default_xkb_rules = {
+	.options = NULL,
+};
+
+static int repeat_rate = 35;
+static int repeat_delay = 250;
+
+static int tap_to_click = 1;
+static int tap_and_drag = 1;
+static int drag_lock = 1;
+static int natural_scrolling = 0;
+static int disable_while_typing = 1;
+static int left_handed = 0;
+static int middle_button_emulation = 0;
+static enum libinput_config_scroll_method scroll_method = LIBINPUT_CONFIG_SCROLL_2FG;
+static enum libinput_config_click_method click_method = LIBINPUT_CONFIG_CLICK_METHOD_BUTTON_AREAS;
+static uint32_t send_events_mode = LIBINPUT_CONFIG_SEND_EVENTS_ENABLED;
+static enum libinput_config_accel_profile accel_profile = LIBINPUT_CONFIG_ACCEL_PROFILE_FLAT;
+static double accel_speed = 0.0;
+static enum libinput_config_tap_button_map button_map = LIBINPUT_CONFIG_TAP_MAP_LRM;
+
+#define MODKEY WLR_MODIFIER_LOGO
+
+#define TAGKEYS(KEY, SHIFTKEY, TAG) \
+	{ MODKEY, KEY, view, {.ui = 1 << TAG} }, \
+	{ MODKEY|WLR_MODIFIER_CTRL, KEY, toggleview, {.ui = 1 << TAG} }, \
+	{ MODKEY|WLR_MODIFIER_SHIFT, KEY, tag, {.ui = 1 << TAG} }, \
+	{ MODKEY|WLR_MODIFIER_CTRL|WLR_MODIFIER_SHIFT, KEY, toggletag, {.ui = 1 << TAG} }, \
+	{ MODKEY|WLR_MODIFIER_SHIFT, SHIFTKEY, view, {.ui = 1 << TAG} }
+
+#define SHCMD(cmd) { .v = (const char*[]){ "/bin/sh", "-c", cmd, NULL } }
+
+static const Key default_keys[] = {
+	{ MODKEY,                              XKB_KEY_Return,    spawn,            SHCMD("quattro-launch-terminal") },
+	{ MODKEY,                              XKB_KEY_space,     spawn,            SHCMD("quattro-menu") },
+	{ MODKEY|WLR_MODIFIER_SHIFT,           XKB_KEY_R,         reloadconfig,     {0} },
+	{ MODKEY,                              XKB_KEY_q,         killclient,       {0} },
+	{ MODKEY,                              XKB_KEY_f,         togglefullscreen, {0} },
+	{ MODKEY,                              XKB_KEY_t,         togglefloating,   {0} },
+	{ MODKEY|WLR_MODIFIER_SHIFT,           XKB_KEY_E,         quit,             {0} },
+	{ WLR_MODIFIER_CTRL|WLR_MODIFIER_ALT,  XKB_KEY_BackSpace, quit,             {0} },
+	TAGKEYS(XKB_KEY_1, XKB_KEY_exclam,     0),
+	TAGKEYS(XKB_KEY_2, XKB_KEY_at,         1),
+	TAGKEYS(XKB_KEY_3, XKB_KEY_numbersign, 2),
+	TAGKEYS(XKB_KEY_4, XKB_KEY_dollar,     3),
+	TAGKEYS(XKB_KEY_5, XKB_KEY_percent,    4),
+	TAGKEYS(XKB_KEY_6, XKB_KEY_asciicircum,5),
+	TAGKEYS(XKB_KEY_7, XKB_KEY_ampersand,  6),
+	TAGKEYS(XKB_KEY_8, XKB_KEY_asterisk,   7),
+	TAGKEYS(XKB_KEY_9, XKB_KEY_parenleft,  8),
+	TAGKEYS(XKB_KEY_0, XKB_KEY_parenright, 9),
+#define CHVT(n) { WLR_MODIFIER_CTRL|WLR_MODIFIER_ALT, XKB_KEY_F##n, chvt, {.ui = (n)} }
+	CHVT(1), CHVT(2), CHVT(3), CHVT(4), CHVT(5), CHVT(6),
+	CHVT(7), CHVT(8), CHVT(9), CHVT(10), CHVT(11), CHVT(12),
+};
+
+static const Button default_buttons[] = {
+	{ MODKEY, BTN_LEFT,   moveresize,     {.ui = CurMove} },
+	{ MODKEY, BTN_MIDDLE, togglefloating, {0} },
+	{ MODKEY, BTN_RIGHT,  moveresize,     {.ui = CurResize} },
+};
+
+static const Axis default_axes[] = {
+	{ 0, 0, NULL, {0} },
+};
 
 static const char *const *autostart = default_autostart;
 static const Rule *rules = default_rules;
