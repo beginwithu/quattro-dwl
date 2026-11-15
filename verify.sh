@@ -81,7 +81,13 @@ fi
 
 echo "==> 5. Running isolated sandbox install & theme rendering test..."
 tmp_home=$(mktemp -d)
-trap 'rm -rf "$tmp_home"' EXIT
+cleanup() {
+  rm -rf "$tmp_home"
+  make -C "$PROJECT_DIR/dwl" clean >/dev/null 2>&1 || true
+  make -C "$PROJECT_DIR/src" clean >/dev/null 2>&1 || true
+  rmdir "$PROJECT_DIR/libexec" 2>/dev/null || true
+}
+trap cleanup EXIT
 
 if HOME="$tmp_home" XDG_CONFIG_HOME="$tmp_home/.config" XDG_DATA_HOME="$tmp_home/.local/share" XDG_STATE_HOME="$tmp_home/.local/state" \
   QUATTRO_INSTALL_SANDBOX=1 "$PROJECT_DIR/install.sh" >/dev/null; then
