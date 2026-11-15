@@ -77,7 +77,6 @@ rules = [
   { app_id = "org.gnome.Calculator",        floating = true },
   { app_id = "org.gnome.NautilusPreviewer", floating = true },
   { app_id = "org.gnome.Papers",            floating = true },
-  { app_id = "waypaper",                    floating = true },
   { app_id = "blueman-manager",             floating = true },
   { app_id = "nm-connection-editor",        floating = true },
   { app_id = "blueberry.py",                floating = true },
