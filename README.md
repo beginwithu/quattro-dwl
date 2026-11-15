@@ -6,6 +6,7 @@ Minimal [dwl](https://codeberg.org/dwl/dwl) desktop configuration and Quickshell
 
 - `config/` - user dotfiles (`dwl/config.toml`, `xdg-desktop-portal`, `xdg-desktop-portal-wlr`, `foot`, `alacritty`, `kitty`, `ghostty`, `btop`, `tmux`, `starship.toml`, etc.)
 - `default/` - runtime defaults (bash setup, dwl IPC protocols, theme templates, systemd user units, fonts)
+- `dwl/` - bundled `dwl` Wayland compositor C source (runtime TOML loader `toml_config.h`, `dwl-ipc-unstable-v2`, `SIGUSR1` live reload, floating rule sizing) built into `~/.local/share/quattro/libexec/dwl` (`~/.local/bin/dwl` & `/usr/local/bin/dwl`)
 - `src/` - C source for `quattro-dwl-ipc` (`dwl-ipc-unstable-v2` bridge)
 - `bin/` - `quattro-*` helper scripts
 - `shell/` - Quickshell configuration (bar, dock, launcher, panels, notifications, lockscreen)
@@ -15,7 +16,7 @@ Minimal [dwl](https://codeberg.org/dwl/dwl) desktop configuration and Quickshell
 - `packages/` - core Arch package list ([arch-core.packages](packages/arch-core.packages)) and [package-map.md](packages/package-map.md)
 - `AGENTS.md` - guide for working on `quattro-shell` (Quickshell architecture, IPC, theming, QML conventions)
 - `install.sh` - single-command installer (deploys runtime, configs, theme, and system integration)
-- `verify.sh` - checks script syntax, C build (`quattro-dwl-ipc`), JSON configs, pacman package names, and sandbox install
+- `verify.sh` - checks script syntax, C builds (`dwl` and `quattro-dwl-ipc`), JSON configs, pacman package names, and sandbox install
 
 ## Install
 

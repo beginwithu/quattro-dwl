@@ -117,10 +117,14 @@ install_packages() {
 
 install_runtime() {
   echo "==> Building & installing Quattro runtime to $INSTALL_DIR..."
+  mkdir -p "$INSTALL_DIR/libexec"
+  if [[ -d $PROJECT_DIR/dwl ]] && command -v make >/dev/null 2>&1; then
+    make -C "$PROJECT_DIR/dwl" >/dev/null
+    install -Dm755 "$PROJECT_DIR/dwl/dwl" "$INSTALL_DIR/libexec/dwl"
+  fi
   if [[ -d $PROJECT_DIR/src ]] && command -v make >/dev/null 2>&1; then
     make -C "$PROJECT_DIR/src" >/dev/null
   fi
-  mkdir -p "$INSTALL_DIR"
 
   for item in applications bin default install libexec shell src themes icon.png icon.txt logo.svg logo.txt version LICENSE; do
     if [[ -d $PROJECT_DIR/$item ]]; then
@@ -140,6 +144,9 @@ install_runtime() {
     local name="${bin_file##*/}"
     ln -snf "$INSTALL_DIR/bin/$name" "$BIN_LINK_DIR/$name"
   done
+  if [[ -x $INSTALL_DIR/libexec/dwl ]]; then
+    ln -snf "$INSTALL_DIR/libexec/dwl" "$BIN_LINK_DIR/dwl"
+  fi
 }
 
 install_user_configs() {
@@ -346,6 +353,9 @@ install_system_configs() {
     /etc/xdg/xdg-desktop-portal \
     /etc/fonts/conf.d
 
+  if [[ -x $INSTALL_DIR/libexec/dwl ]]; then
+    sudo install -Dm755 "$INSTALL_DIR/libexec/dwl" /usr/local/bin/dwl
+  fi
   sudo install -Dm755 "$INSTALL_DIR/bin/quattro-dwl-session" /usr/local/bin/quattro-dwl-session
   sudo cp -a "$PROJECT_DIR/default/wayland-sessions/quattro.desktop" /usr/local/share/wayland-sessions/quattro.desktop
   sudo cp -a "$PROJECT_DIR/etc/sddm.conf.d/10-wayland.conf" /etc/sddm.conf.d/10-wayland.conf

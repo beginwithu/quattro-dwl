@@ -26,7 +26,13 @@ while IFS= read -r -d '' script; do
 done < <(find "$PROJECT_DIR/install.sh" "$PROJECT_DIR/verify.sh" "$PROJECT_DIR/bin" "$PROJECT_DIR/default/bash" -type f -print0)
 (( script_errors == 0 )) && pass "All Bash & Python scripts pass syntax checks" || fail "$script_errors script syntax error(s)"
 
-echo "==> 2. Building quattro-dwl-ipc & checking CLI metadata..."
+echo "==> 2. Building dwl, quattro-dwl-ipc & checking CLI metadata..."
+if command -v make >/dev/null 2>&1 && make -C "$PROJECT_DIR/dwl" clean all >/dev/null 2>&1 && [[ -x $PROJECT_DIR/dwl/dwl ]]; then
+  pass "dwl builds cleanly"
+else
+  fail "dwl build failed"
+fi
+
 if command -v make >/dev/null 2>&1 && make -C "$PROJECT_DIR/src" clean all >/dev/null 2>&1 && "$PROJECT_DIR/bin/quattro-dwl-ipc" --help >/dev/null 2>&1; then
   pass "quattro-dwl-ipc builds cleanly with zero warnings"
 else
@@ -103,7 +109,9 @@ expected_files=(
   "$tmp_home/.config/chromium-flags.conf"
   "$tmp_home/.local/share/quattro/bin/quattro"
   "$tmp_home/.local/share/quattro/bin/quattro-dwl-ipc"
+  "$tmp_home/.local/share/quattro/libexec/dwl"
   "$tmp_home/.local/share/quattro/libexec/quattro-dwl-ipc"
+  "$tmp_home/.local/bin/dwl"
   "$tmp_home/.local/bin/quattro"
   "$tmp_home/.local/state/quattro/current/theme/colors.toml"
   "$tmp_home/.local/state/quattro/current/theme/alacritty.toml"

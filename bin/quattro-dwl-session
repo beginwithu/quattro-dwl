@@ -60,15 +60,22 @@ if command -v quattro-hw-nvidia >/dev/null 2>&1 && quattro-hw-nvidia; then
   fi
 fi
 
-DWL_BIN=$(command -v dwl || true)
+DWL_BIN=""
+if [[ -x "$QUATTRO_PATH/libexec/dwl" ]]; then
+  DWL_BIN="$QUATTRO_PATH/libexec/dwl"
+else
+  DWL_BIN=$(command -v dwl || true)
+fi
 if [[ -z $DWL_BIN && -x /usr/local/bin/dwl ]]; then
   DWL_BIN=/usr/local/bin/dwl
+elif [[ -z $DWL_BIN && -x "$HOME/Projects/quattro-dwl/dwl/dwl" ]]; then
+  DWL_BIN="$HOME/Projects/quattro-dwl/dwl/dwl"
 elif [[ -z $DWL_BIN && -x "$HOME/Projects/dwl/dwl" ]]; then
   DWL_BIN="$HOME/Projects/dwl/dwl"
 fi
 
 if [[ -z $DWL_BIN ]]; then
-  echo "quattro-dwl-session: dwl binary not found in PATH, /usr/local/bin/dwl, or ~/Projects/dwl/dwl" >&2
+  echo "quattro-dwl-session: dwl binary not found in $QUATTRO_PATH/libexec/dwl, PATH, /usr/local/bin/dwl, or ~/Projects/quattro-dwl/dwl/dwl" >&2
   exit 1
 fi
 

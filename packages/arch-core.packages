@@ -1,15 +1,24 @@
 # Lean core packages required for Quattro (dwl, Quickshell, theming, and shell scripts)
 # All packages exist in official Arch [core] / [extra] repositories.
 
-# Wayland compositor, XWayland & shell
+# Wayland compositor, build deps, XWayland & shell
 egl-x11
+gcc
+libinput
+libxcb
+libxkbcommon
+make
+pkgconf
 quickshell
 sddm
 uwsm
+wayland
+wayland-protocols
 wl-clipboard
 wlopm
 wlroots0.20
 wlsunset
+xcb-util-wm
 xdg-desktop-portal
 xdg-desktop-portal-gtk
 xdg-desktop-portal-wlr
