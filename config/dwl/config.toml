@@ -25,6 +25,8 @@ refresh   = 0.0
 scale     = 1.0
 layout    = "dwindle"
 transform = "normal"
+x         = -1
+y         = -1
 
 [appearance]
 sloppyfocus               = true
@@ -68,17 +70,25 @@ button_map              = "lrm"             # "lrm" | "lmr"
 
 [window_rules]
 rules = [
-  { app_id = "org.pulseaudio.pavucontrol", floating = true },
-  { app_id = "pavucontrol",                floating = true },
-  { app_id = "localsend",                  floating = true },
-  { app_id = "org.gnome.baobab",           floating = true },
-  { app_id = "org.gnome.Calculator",       floating = true },
-  { app_id = "waypaper",                   floating = true },
-  { app_id = "blueman-manager",            floating = true },
-  { app_id = "nm-connection-editor",       floating = true },
-  { app_id = "blueberry.py",               floating = true },
-  { app_id = "xdg-desktop-portal-gtk",     floating = true },
-  { app_id = "quattro-floating",           floating = true },
+  { app_id = "org.pulseaudio.pavucontrol",  floating = true },
+  { app_id = "pavucontrol",                 floating = true },
+  { app_id = "localsend",                   floating = true },
+  { app_id = "org.gnome.baobab",            floating = true },
+  { app_id = "org.gnome.Calculator",        floating = true },
+  { app_id = "org.gnome.NautilusPreviewer", floating = true },
+  { app_id = "org.gnome.Papers",            floating = true },
+  { app_id = "waypaper",                    floating = true },
+  { app_id = "blueman-manager",             floating = true },
+  { app_id = "nm-connection-editor",        floating = true },
+  { app_id = "blueberry.py",                floating = true },
+  { app_id = "xdg-desktop-portal-gtk",      floating = true },
+  { app_id = "imv",                         floating = true },
+  { app_id = "mpv",                         floating = true },
+  { app_id = "WebcamOverlay-",              floating = true },
+  { app_id = "org.quattro.about",           floating = true, width = 920, height = 520 },
+  { app_id = "org.quattro.terminal",        floating = true, width = 875, height = 600 },
+  { app_id = "quattro-floating",            floating = true, width = 875, height = 600 },
+  { app_id = "TUI.float",                   floating = true, width = 875, height = 600 },
 ]
 
 [bindings]
