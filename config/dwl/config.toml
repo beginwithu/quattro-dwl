@@ -1,6 +1,31 @@
 # Runtime configuration for dwl (no recompile needed!)
 # Reload live anytime with: Super + Shift + R   (or: pkill -USR1 dwl)
 
+# --- Monitors (kept as [[monitors]] blocks for Quattro monitor scripts) ---
+[[monitors]]
+name      = "HDMI-A-1"
+mfact     = 0.55
+nmaster   = 1
+width     = 1920
+height    = 1080
+refresh   = 100.0
+scale     = 1.0
+layout    = "dwindle"                       # "dwindle" | "floating" | "tile" | "monocle"
+transform = "normal"                        # "normal" | "90" | "180" | "270" | "flipped" | ...
+x         = 0
+y         = 0
+
+[[monitors]]
+name      = "*"
+mfact     = 0.55
+nmaster   = 1
+width     = 0
+height    = 0
+refresh   = 0.0
+scale     = 1.0
+layout    = "dwindle"
+transform = "normal"
+
 [appearance]
 sloppyfocus               = true
 bypass_surface_visibility = false
@@ -172,30 +197,3 @@ buttons = [
   { mod = ["MODKEY"], button = "middle", action = "togglefloating" },
   { mod = ["MODKEY"], button = "right",  action = "moveresize",     arg = "resize" },
 ]
-
-# --- Monitors (kept as [[monitors]] blocks for Quattro monitor scripts) ---
-[[monitors]]
-name      = "HDMI-A-1"
-mfact     = 0.55
-nmaster   = 1
-width     = 1920
-height    = 1080
-refresh   = 100.0
-scale     = 1.0
-layout    = "dwindle"                       # "dwindle" | "floating" | "tile" | "monocle"
-transform = "normal"                        # "normal" | "90" | "180" | "270" | "flipped" | ...
-x         = 0
-y         = 0
-
-[[monitors]]
-name      = "*"
-mfact     = 0.55
-nmaster   = 1
-width     = 0
-height    = 0
-refresh   = 0.0
-scale     = 1.0
-layout    = "dwindle"
-transform = "normal"
-x         = -1
-y         = -1
