@@ -89,8 +89,8 @@
 /* enums */
 enum { CurNormal, CurPressed, CurMove, CurResize }; /* cursor */
 enum { XDGShell, LayerShell, X11 }; /* client types */
-enum { LyrBg, LyrBottom, LyrTile, LyrFloat, LyrTop, LyrFS, LyrUnmanaged, LyrOverlay,
-	LyrIMPopup, LyrBlock, NUM_LAYERS }; /* scene layers */
+enum { LyrBg, LyrBottom, LyrTile, LyrFloat, LyrTop, LyrTopPopup, LyrFS, LyrUnmanaged, LyrOverlay,
+	LyrOverlayPopup, LyrIMPopup, LyrBlock, NUM_LAYERS }; /* scene layers */
 enum { AxisUp, AxisRight, AxisDown, AxisLeft };
 
 typedef union {
@@ -1218,12 +1218,26 @@ closemon(Monitor *m)
 	printstatus();
 }
 
+static struct wlr_scene_tree *
+layerpopuptree(enum zwlr_layer_shell_v1_layer layer)
+{
+	switch (layer) {
+	case ZWLR_LAYER_SHELL_V1_LAYER_TOP:
+		return layers[LyrTopPopup];
+	case ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY:
+		return layers[LyrOverlayPopup];
+	default:
+		return layers[LyrTop];
+	}
+}
+
 void
 commitlayersurfacenotify(struct wl_listener *listener, void *data)
 {
 	LayerSurface *l = wl_container_of(listener, l, surface_commit);
 	struct wlr_layer_surface_v1 *layer_surface = l->layer_surface;
 	struct wlr_scene_tree *scene_layer = layers[layermap[layer_surface->current.layer]];
+	struct wlr_scene_tree *popup_tree;
 	struct wlr_layer_surface_v1_state old_state;
 
 	if (l->layer_surface->initial_commit) {
@@ -1242,13 +1256,15 @@ commitlayersurfacenotify(struct wl_listener *listener, void *data)
 		return;
 	l->mapped = layer_surface->surface->mapped;
 
+	popup_tree = layerpopuptree(layer_surface->current.layer);
+
 	if (scene_layer != l->scene->node.parent) {
 		wlr_scene_node_reparent(&l->scene->node, scene_layer);
 		wl_list_remove(&l->link);
 		wl_list_insert(&l->mon->layers[layer_surface->current.layer], &l->link);
-		wlr_scene_node_reparent(&l->popups->node, (layer_surface->current.layer
-				< ZWLR_LAYER_SHELL_V1_LAYER_TOP ? layers[LyrTop] : scene_layer));
 	}
+	if (popup_tree != l->popups->node.parent)
+		wlr_scene_node_reparent(&l->popups->node, popup_tree);
 
 	arrangelayers(l->mon);
 }
@@ -1327,6 +1343,8 @@ commitpopup(struct wl_listener *listener, void *data)
 		wlr_xdg_popup_destroy(popup);
 		return;
 	}
+	if (type == LayerShell && l)
+		wlr_scene_node_raise_to_top(&l->popups->node);
 	box = type == LayerShell ? l->mon->m : c->mon->w;
 	box.x -= (type == LayerShell ? l->scene->node.x : c->geom.x - c->surface.xdg->geometry.x);
 	box.y -= (type == LayerShell ? l->scene->node.y : c->geom.y - c->surface.xdg->geometry.y);
@@ -1428,8 +1446,7 @@ createlayersurface(struct wl_listener *listener, void *data)
 	l->mon = layer_surface->output->data;
 	l->scene_layer = wlr_scene_layer_surface_v1_create(scene_layer, layer_surface);
 	l->scene = l->scene_layer->tree;
-	l->popups = surface->data = wlr_scene_tree_create(layer_surface->current.layer
-			< ZWLR_LAYER_SHELL_V1_LAYER_TOP ? layers[LyrTop] : scene_layer);
+	l->popups = surface->data = wlr_scene_tree_create(layerpopuptree(layer_surface->pending.layer));
 	l->scene->node.data = l->popups->node.data = l;
 
 	wl_list_insert(&l->mon->layers[layer_surface->pending.layer],&l->link);

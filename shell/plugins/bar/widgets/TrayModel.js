@@ -39,8 +39,11 @@ var widgetsForTrayItems = [
 // LocalSend's item shows no state, offers only Open and Quit, and its primary
 // click is a no-op, so Share > Receive is the whole surface. Hiding it by hand
 // doesn't stick either: LocalSend picks a fresh tray id every launch.
+// Fcitx5's notificationitem addon is normally disabled in quattro-fcitx5.service,
+// so suppress any stray Fcitx SNI entry rather than showing a blank icon.
 function ownedByQuattro(item, layout) {
   if (itemNamed(item, "localsend")) return true
+  if (itemNamed(item, "fcitx")) return true
   for (var i = 0; i < widgetsForTrayItems.length; i++) {
     var owner = widgetsForTrayItems[i]
     if (itemNamed(item, owner.item) && layoutHasWidget(layout, owner.widget)) return true

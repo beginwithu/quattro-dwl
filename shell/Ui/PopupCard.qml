@@ -4,7 +4,11 @@ import Quickshell.Wayland
 import qs.Commons
 import qs.Commons as Commons
 
-PopupWindow {
+// Layer-shell popup card anchored to a bar widget. Uses a full-screen
+// PanelWindow (like KeyboardPanel) rather than xdg-popup (PopupWindow) so
+// dynamic content resizing (such as async DBus tray menus) never stretches
+// an initial buffer across a Wayland popup configure cycle.
+PanelWindow {
   id: root
 
   required property Item anchorItem
@@ -18,27 +22,28 @@ PopupWindow {
   property var borderSpec: Border.localOrSurfaceSpec("popups", "border", borderColor, Commons.Color.popups.border, Math.max(1, Style.space(2)))
   property bool open: false
   property bool centerOnBar: false
-  // "click" — uses a transparent layer-shell scrim so clicking outside dismisses the popup.
-  // "hover" — passive overlay; the owning widget controls open via hover.
+  // "click" — dismisses when clicking outside the card on any screen.
+  // "hover" — only the card region accepts input; owner controls open via hover.
   property string triggerMode: "click"
 
   readonly property var coordinatorKey: owner || root
   readonly property var anchorWindow: anchorItem ? anchorItem.QsWindow.window : null
-  readonly property var popupScreen: anchorWindow ? anchorWindow.screen : null
+  readonly property var popupScreen: screen
+  readonly property string barPos: bar ? bar.position : "top"
   readonly property bool containsMouse: cardHover.hovered
-  readonly property real screenW: popupScreen ? popupScreen.width : 0
-  readonly property real screenH: popupScreen ? popupScreen.height : 0
+  readonly property real screenW: screen ? screen.width : 0
+  readonly property real screenH: screen ? screen.height : 0
   // Thickness of the painted bar strip on this screen, notch floor
   // included. The bar window spans its whole screen (only the strip inside
   // it is painted and takes input), so the window's dimensions say nothing
   // about the bar.
   readonly property real barThickness: !bar ? 0
-    : (typeof bar.barSizeFor === "function" && popupScreen ? bar.barSizeFor(popupScreen.name) : bar.barSize)
+    : (typeof bar.barSizeFor === "function" && screen ? bar.barSizeFor(screen.name) : bar.barSize)
   readonly property real availableCardWidth: screenW > 0
-    ? Math.max(120, screenW - ((bar && (bar.position === "left" || bar.position === "right")) ? barThickness : 0) - root.margin * 2)
+    ? Math.max(120, screenW - ((barPos === "left" || barPos === "right") ? barThickness : 0) - root.margin * 2)
     : 0
   readonly property real availableCardHeight: screenH > 0
-    ? Math.max(120, screenH - ((bar && (bar.position === "top" || bar.position === "bottom")) ? barThickness : 0) - root.margin * 2)
+    ? Math.max(120, screenH - ((barPos === "top" || barPos === "bottom") ? barThickness : 0) - root.margin * 2)
     : 0
   readonly property real verticalContentInset: padding * 2 + Border.top(borderSpec) + Border.bottom(borderSpec)
 
@@ -69,13 +74,79 @@ PopupWindow {
 
   default property alias contentItem: contentHolder.children
 
+  screen: anchorWindow ? anchorWindow.screen : null
   visible: open || card.opacity > 0
   color: "transparent"
-  // A closing card stays mapped until its fade ends; it must not take clicks
-  // meant for the bar underneath while it does.
-  mask: Region { item: root.open ? card : null }
-  implicitWidth: contentWidth
-  implicitHeight: contentHeight
+  exclusionMode: ExclusionMode.Ignore
+
+  WlrLayershell.namespace: "quattro-popup-card"
+  WlrLayershell.layer: WlrLayer.Overlay
+  WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+
+  anchors {
+    top: true
+    bottom: true
+    left: true
+    right: true
+  }
+
+  // A closing card stays mapped until its fade ends; leave its input region
+  // empty then so clicks meant for the bar or windows beneath pass through.
+  Region { id: emptyRegion }
+  Region { id: cardRegion; item: card }
+  Region { id: fullRegion; width: root.screenW; height: root.screenH }
+  mask: !root.open ? emptyRegion : (root.triggerMode === "hover" ? cardRegion : fullRegion)
+
+  TransformWatcher {
+    id: anchorWatcher
+    a: anchorWindow ? anchorWindow.contentItem : null
+    b: anchorItem
+  }
+
+  readonly property point anchorScreenPos: {
+    anchorWatcher.transform
+    if (!anchorItem || !anchorWindow) return Qt.point(0, 0)
+    return anchorItem.mapToItem(anchorWindow.contentItem, 0, 0)
+  }
+  readonly property real anchorW: anchorItem ? anchorItem.width : 0
+  readonly property real anchorH: anchorItem ? anchorItem.height : 0
+
+  readonly property point cardOrigin: {
+    if (!anchorItem || !bar) return Qt.point(margin, margin)
+    var x = 0
+    var y = 0
+    if (centerOnBar && (barPos === "top" || barPos === "bottom")) {
+      x = screenW / 2 - contentWidth / 2
+      y = barPos === "bottom" ? screenH - barThickness - contentHeight - margin : barThickness + margin
+    } else if (centerOnBar) {
+      x = barPos === "left" ? barThickness + margin : screenW - barThickness - contentWidth - margin
+      y = screenH / 2 - contentHeight / 2
+    } else if (barPos === "bottom") {
+      x = anchorScreenPos.x + anchorW / 2 - contentWidth / 2
+      y = screenH - barThickness - contentHeight - margin
+    } else if (barPos === "left") {
+      x = barThickness + margin
+      y = anchorScreenPos.y + anchorH / 2 - contentHeight / 2
+    } else if (barPos === "right") {
+      x = screenW - barThickness - contentWidth - margin
+      y = anchorScreenPos.y + anchorH / 2 - contentHeight / 2
+    } else {
+      x = anchorScreenPos.x + anchorW / 2 - contentWidth / 2
+      y = barThickness + margin
+    }
+    x = Math.max(margin, Math.min(x, screenW - contentWidth - margin))
+    y = Math.max(margin, Math.min(y, screenH - contentHeight - margin))
+    return Qt.point(Math.round(x), Math.round(y))
+  }
+
+  readonly property point growOrigin: {
+    var x = Math.max(0, Math.min(anchorScreenPos.x + anchorW / 2 - cardOrigin.x, contentWidth))
+    var y = Math.max(0, Math.min(anchorScreenPos.y + anchorH / 2 - cardOrigin.y, contentHeight))
+    if (barPos === "bottom") return Qt.point(x, contentHeight)
+    if (barPos === "left") return Qt.point(0, y)
+    if (barPos === "right") return Qt.point(contentWidth, y)
+    return Qt.point(x, 0)
+  }
 
   onOpenChanged: {
     if (!bar) return
@@ -83,97 +154,52 @@ PopupWindow {
     else if (bar.activePopout === coordinatorKey) bar.releasePopout(coordinatorKey)
   }
 
-  // Outside-click dismissal via transparent layer-shell scrim across all screens.
-  // Skipped for hover-mode popups so the cursor can move freely between trigger and popup.
-  Variants {
-    model: root.open && root.triggerMode === "click" ? Quickshell.screens : []
-    delegate: PanelWindow {
-      required property var modelData
-      screen: modelData
-      color: "transparent"
-      anchors { top: true; bottom: true; left: true; right: true }
-      exclusionMode: ExclusionMode.Ignore
-      WlrLayershell.layer: WlrLayer.Top
-      WlrLayershell.namespace: "quattro-popup-dismiss"
-      WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
-
-      MouseArea {
-        anchors.fill: parent
-        acceptedButtons: Qt.AllButtons
-        onPressed: root.close()
-      }
-    }
+  // Click anywhere outside the card on the active output to dismiss.
+  MouseArea {
+    anchors.fill: parent
+    enabled: root.open && root.triggerMode === "click"
+    acceptedButtons: Qt.AllButtons
+    onPressed: root.close()
   }
 
-  anchor {
-    id: popupAnchor
-    window: anchorItem ? anchorItem.QsWindow.window : null
-    adjustment: PopupAdjustment.Slide
-    edges: Edges.Top | Edges.Left
-    gravity: Edges.Bottom | Edges.Right
-    rect.width: 1
-    rect.height: 1
+  // Cover other outputs so clicking elsewhere dismisses the popup there too.
+  Variants {
+    model: root.open && root.triggerMode === "click" ? Quickshell.screens : []
 
-    onAnchoring: {
-      if (!root.anchorItem || !root.bar) return
+    delegate: Component {
+      PanelWindow {
+        required property var modelData
 
-      var target = root.anchorItem
-      var popupWidth = root.implicitWidth
-      var popupHeight = root.implicitHeight
-      var localX = target.width / 2 - popupWidth / 2
-      var localY = target.height + root.margin
+        screen: modelData
+        visible: root.open && !!root.screen && modelData.name !== root.screen.name
+        color: "transparent"
+        exclusionMode: ExclusionMode.Ignore
+        WlrLayershell.namespace: "quattro-popup-dismiss"
+        WlrLayershell.layer: WlrLayer.Overlay
+        WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
 
-      if (root.bar.position === "bottom") {
-        localY = -popupHeight - root.margin
-      } else if (root.bar.position === "left") {
-        localX = target.width + root.margin
-        localY = target.height / 2 - popupHeight / 2
-      } else if (root.bar.position === "right") {
-        localX = -popupWidth - root.margin
-        localY = target.height / 2 - popupHeight / 2
-      }
-
-      var window = target.QsWindow.window
-      if (!window) return
-
-      if (root.centerOnBar) {
-        var cx = 0;
-        var cy = 0;
-        if (root.bar.position === "top" || root.bar.position === "bottom") {
-          cx = window.width / 2 - popupWidth / 2
-          cy = root.bar.position === "bottom"
-            ? window.height - root.barThickness - popupHeight - root.margin
-            : root.barThickness + root.margin
-          cx = Math.max(root.margin, Math.min(cx, window.width - popupWidth - root.margin))
-        } else {
-          cx = root.bar.position === "left"
-            ? root.barThickness + root.margin
-            : window.width - root.barThickness - popupWidth - root.margin
-          cy = window.height / 2 - popupHeight / 2
-          cy = Math.max(root.margin, Math.min(cy, window.height - popupHeight - root.margin))
+        anchors {
+          top: true
+          bottom: true
+          left: true
+          right: true
         }
 
-        popupAnchor.rect.x = Math.round(cx)
-        popupAnchor.rect.y = Math.round(cy)
-        return
+        MouseArea {
+          anchors.fill: parent
+          acceptedButtons: Qt.AllButtons
+          onPressed: root.close()
+        }
       }
-
-      var point = window.contentItem.mapFromItem(target, localX, localY)
-
-      if (root.bar.position === "top" || root.bar.position === "bottom") {
-        point.x = Math.max(root.margin, Math.min(point.x, window.width - popupWidth - root.margin))
-      } else {
-        point.y = Math.max(root.margin, Math.min(point.y, window.height - popupHeight - root.margin))
-      }
-
-      popupAnchor.rect.x = Math.round(point.x)
-      popupAnchor.rect.y = Math.round(point.y)
     }
   }
 
   BorderSurface {
     id: card
-    anchors.fill: parent
+    x: root.cardOrigin.x
+    y: root.cardOrigin.y
+    width: root.contentWidth
+    height: root.contentHeight
     color: Commons.Color.popups.background
     borderSpec: root.borderSpec
     padding: root.padding
@@ -191,10 +217,19 @@ PopupWindow {
       }
     }
     opacity: shown
-    scale: 0.97 + 0.03 * shown
-    transformOrigin: !root.bar || root.bar.position === "top" ? Item.Top
-      : root.bar.position === "bottom" ? Item.Bottom
-      : root.bar.position === "left" ? Item.Left : Item.Right
+    transform: Scale {
+      origin.x: root.growOrigin.x
+      origin.y: root.growOrigin.y
+      xScale: 0.97 + 0.03 * card.shown
+      yScale: 0.97 + 0.03 * card.shown
+    }
+
+    // Swallow clicks on the card so they don't bubble to the dismissal
+    // MouseArea behind us.
+    MouseArea {
+      anchors.fill: parent
+      acceptedButtons: Qt.AllButtons
+    }
 
     Item {
       id: contentHolder

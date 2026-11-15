@@ -62,7 +62,7 @@ if [[ ! -e $session_boot_marker ]]; then
   fi
   command -v fcitx5 >/dev/null 2>&1 && ! pgrep -x fcitx5 >/dev/null 2>&1 && (
     eval "exec ${launch_lock_fd}>&-"
-    exec fcitx5 -d >/dev/null 2>&1
+    exec fcitx5 -d --disable notificationitem >/dev/null 2>&1
   ) &
   command -v quattro-provision-first-run >/dev/null 2>&1 && (
     eval "exec ${launch_lock_fd}>&-"
