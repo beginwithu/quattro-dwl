@@ -1,0 +1,45 @@
+#!/bin/bash
+
+# quattro:summary=Toggle internal/external display mirror positions in dwl config.toml (or config.h)
+# quattro:group=dwl
+# quattro:name=monitor mirror
+# quattro:args=[on|off|toggle]
+
+set -euo pipefail
+
+INTERNAL=$(quattro-dwl-ipc --monitors 2>/dev/null | jq -r '[.[] | select(.name | test("^(eDP|LVDS|DSI)-"))][0].name // empty')
+[[ -n $INTERNAL ]] || { echo "No built-in display found" >&2; exit 1; }
+
+ACTION=${1:-toggle}
+if [[ $ACTION == "toggle" ]]; then
+  if quattro-dwl-toggle-enabled internal-monitor-mirror; then
+    ACTION="off"
+  else
+    ACTION="on"
+  fi
+fi
+
+case $ACTION in
+  on)
+    quattro-dwl-monitor-persist --monitor "$INTERNAL" --pos 0,0
+    while read -r ext; do
+      [[ -n $ext ]] || continue
+      quattro-dwl-monitor-persist --monitor "$ext" --pos 0,0
+    done < <(quattro-dwl-ipc --monitors 2>/dev/null | jq -r --arg m "$INTERNAL" '.[] | select(.name != $m) | .name')
+    quattro-dwl-toggle internal-monitor-mirror on
+    ;;
+  off)
+    next_x=0
+    while read -r name width scale; do
+      [[ -n $name ]] || continue
+      quattro-dwl-monitor-persist --monitor "$name" --pos "${next_x},0"
+      logical=$(awk -v w="${width:-1920}" -v s="${scale:-1}" 'BEGIN { if (s <= 0) s = 1; printf "%d", int(w / s) }')
+      next_x=$(( next_x + logical ))
+    done < <(quattro-dwl-ipc --monitors 2>/dev/null | jq -r '.[] | ((.modes // []) | map(select(.current == true))[0] // (.modes // [])[0]) as $m | "\(.name) \($m.width // 1920) \(.scale // 1)"')
+    quattro-dwl-toggle internal-monitor-mirror off
+    ;;
+  *)
+    echo "Usage: quattro-dwl-monitor-internal-mirror [on|off|toggle]" >&2
+    exit 1
+    ;;
+esac

@@ -1,0 +1,10 @@
+#!/bin/bash
+
+# quattro:summary=Wake displays and restore brightness after idle
+# quattro:group=system
+# quattro:name=wake
+# quattro:examples=quattro system wake
+
+quattro-brightness-display on
+quattro-brightness-keyboard restore
+quattro-dwl-monitor-clamshell >/dev/null 2>&1 || true

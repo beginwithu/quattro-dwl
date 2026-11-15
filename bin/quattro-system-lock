@@ -1,0 +1,38 @@
+#!/bin/bash
+
+# quattro:summary=Lock the computer and turn off the display
+# quattro:group=system
+# quattro:name=lock
+# quattro:examples=quattro system lock
+
+lock_result=$(quattro-shell lock lock 2>/dev/null || true)
+if [[ $lock_result != "ok" ]]; then
+  if [[ $lock_result == "missing-pam" ]]; then
+    quattro-notification-send -u critical \
+      "Lock screen is not configured" \
+      "Run: sudo quattro-apply-lock (or re-run ./install.sh) to configure /etc/pam.d/quattro-lock-password." || true
+    exit 1
+  else
+    quattro-notification-send -u critical \
+      "Unable to lock screen" \
+      "quattro-shell lock did not succeed (${lock_result:-shell unavailable})." || true
+    exit 1
+  fi
+fi
+
+# Ensure 1password is locked. Use timeout because `1password --lock` can
+# otherwise leave a full Electron helper tree running after each lock.
+if pgrep -x "1password" >/dev/null && quattro-cmd-present 1password; then
+  (
+    flock -n 9 || exit 0
+    timeout --kill-after=1s 3s 1password --lock >/dev/null 2>&1 || true
+  ) 9>"${XDG_RUNTIME_DIR:-/tmp}/quattro-1password-lock.lock" &
+fi
+
+# Avoid running screensaver when locked
+quattro-shell -q shell hide quattro.screensaver >/dev/null 2>&1 || true
+pkill -f 'quickshell -p .*/shell/screensaver\.qml' >/dev/null 2>&1 || true
+screensaver='[/]usr/lib/quattro-screensaver/quattro-screensaver'
+if pkill -f "$screensaver" 2>/dev/null; then
+  timeout 1s pidwait -f "$screensaver" 2>/dev/null || pkill -KILL -f "$screensaver" 2>/dev/null || true
+fi

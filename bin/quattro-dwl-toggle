@@ -1,0 +1,27 @@
+#!/bin/bash
+
+# quattro:summary=Enable or disable a Quattro dwl state toggle flag
+# quattro:group=dwl
+# quattro:name=toggle
+# quattro:args=<name> [on|off|toggle]
+# quattro:hidden=true
+
+set -euo pipefail
+
+NAME=${1:-}
+ACTION=${2:-toggle}
+DIR="$HOME/.local/state/quattro/toggles/dwl"
+
+[[ -n $NAME ]] || { echo "Usage: quattro-dwl-toggle <name> [on|off|toggle]" >&2; exit 1; }
+mkdir -p "$DIR"
+FLAG="$DIR/$NAME"
+
+if [[ $ACTION == "toggle" ]]; then
+  if [[ -e $FLAG ]]; then ACTION=off; else ACTION=on; fi
+fi
+
+case $ACTION in
+  on)  : >"$FLAG" ;;
+  off) rm -f "$FLAG" ;;
+  *)   echo "Usage: quattro-dwl-toggle <name> [on|off|toggle]" >&2; exit 1 ;;
+esac

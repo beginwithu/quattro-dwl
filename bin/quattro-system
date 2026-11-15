@@ -1,0 +1,125 @@
+#!/bin/bash
+
+# quattro:summary=Log out, reboot, or shut down after closing applications
+# quattro:args=<logout|reboot|shutdown>
+# quattro:examples=quattro system logout | quattro system reboot | quattro system shutdown
+# quattro:aliases=quattro logout | quattro reboot | quattro shutdown
+
+usage="Usage: quattro-system <logout|reboot|shutdown>"
+for arg in "$@"; do
+  case $arg in
+    -h | --help) echo "$usage"; exit 0 ;;
+  esac
+done
+if (( $# > 2 )); then
+  echo "$usage" >&2
+  exit 2
+fi
+
+action=${1:-}
+case $action in
+  logout) command=(uwsm stop) ;;
+  reboot) command=(systemctl reboot --no-wall) ;;
+  shutdown) command=(systemctl poweroff --no-wall) ;;
+  *) echo "$usage" >&2; exit 2 ;;
+esac
+
+# Each action has whole sentences of its own, so a translation can inflect it.
+case $action in
+  logout)
+    message=$(quattro-i18n system.loggingOut)
+    failed_title=$(quattro-i18n system.logoutFailed)
+    failed_body=$(quattro-i18n system.logoutRetry)
+    ;;
+  reboot)
+    message=$(quattro-i18n system.rebooting)
+    failed_title=$(quattro-i18n system.rebootFailed)
+    failed_body=$(quattro-i18n system.rebootRetry)
+    ;;
+  shutdown)
+    message=$(quattro-i18n system.shuttingDown)
+    failed_title=$(quattro-i18n system.shutdownFailed)
+    failed_body=$(quattro-i18n system.shutdownRetry)
+    ;;
+esac
+
+logout_session() {
+  if command -v uwsm >/dev/null 2>&1 && uwsm check is-active >/dev/null 2>&1; then
+    if uwsm stop >/dev/null 2>&1; then
+      for _ in {1..15}; do
+        if ! pgrep -u "$UID" -x dwl >/dev/null 2>&1; then
+          return 0
+        fi
+        sleep 0.1
+      done
+    fi
+  fi
+
+  if pgrep -u "$UID" -x dwl >/dev/null 2>&1; then
+    pkill -TERM -u "$UID" -x dwl >/dev/null 2>&1 || true
+    for _ in {1..15}; do
+      if ! pgrep -u "$UID" -x dwl >/dev/null 2>&1; then
+        return 0
+      fi
+      sleep 0.1
+    done
+  fi
+
+  local session_id="${XDG_SESSION_ID:-}"
+  if [[ -z $session_id ]] && command -v loginctl >/dev/null 2>&1; then
+    session_id=$(loginctl list-sessions --no-legend 2>/dev/null | awk -v user="$USER" '
+      $3 == user { sid = $1 }
+      END { if (sid) print sid }
+    ')
+  fi
+  if [[ -n $session_id ]] && command -v loginctl >/dev/null 2>&1; then
+    loginctl terminate-session "$session_id" && return 0
+  fi
+
+  return 1
+}
+
+exit_session() {
+  quattro-osd -i "$action" -m "$message" -d 5000 || true
+  if [[ $action != "logout" ]]; then
+    quattro-state clear re*-required
+  fi
+
+  if [[ $action == "logout" ]]; then
+    logout_session
+  else
+    "${command[@]}"
+  fi
+}
+
+if [[ ${2:-} == "--inhibited" ]]; then
+  exit_session
+elif [[ ${2:-} == "--execute" ]]; then
+  if [[ $action == "shutdown" ]]; then
+    # Block lid handling explicitly: it ignores high-level sleep inhibitors.
+    systemd-inhibit --what=sleep:idle:handle-lid-switch \
+      --who=Quattro --why="Shutdown in progress" --mode=block \
+      "$0" "$action" --inhibited
+  else
+    exit_session
+  fi
+  status=$?
+  if (( status != 0 )); then
+    quattro-notification-send -u critical "$failed_title" "$failed_body"
+    exit "$status"
+  fi
+elif [[ -z ${2:-} ]]; then
+  # Survive closing the terminal that requested the session exit.
+  setenv_args=()
+  for var in PATH QUATTRO_PATH WAYLAND_DISPLAY XDG_RUNTIME_DIR XDG_SESSION_ID XDG_CURRENT_DESKTOP DBUS_SESSION_BUS_ADDRESS; do
+    [[ -n ${!var:-} ]] && setenv_args+=(--setenv="$var")
+  done
+  if ! systemd-run --user --collect --quiet --property=Type=exec --property=RuntimeMaxSec=30s \
+    "${setenv_args[@]}" \
+    "$0" "$action" --execute 2>/dev/null; then
+    setsid "$0" "$action" --execute >/dev/null 2>&1 &
+  fi
+else
+  echo "$usage" >&2
+  exit 2
+fi

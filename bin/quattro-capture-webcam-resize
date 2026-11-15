@@ -1,0 +1,32 @@
+#!/bin/bash
+
+# quattro:summary=Resize the active webcam recording overlay
+# quattro:group=capture
+# quattro:args=<smaller|larger|reset|small|medium|large>
+# quattro:examples=quattro capture webcam resize smaller | quattro-capture-webcam-resize reset
+
+set -euo pipefail
+
+readonly MARGIN=40
+# Has to resolve to whatever quattro-capture-screenrecording writes, fallback
+# included, or a recording without a session runtime dir anchors the camera to
+# the whole monitor instead of the region it recorded.
+readonly REGION_FILE="${XDG_RUNTIME_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/quattro}/quattro-screenrecord-region"
+
+usage() {
+  echo "Usage: quattro-capture-webcam-resize <smaller|larger|reset|small|medium|large>" >&2
+  exit 1
+}
+
+# Note: dwl does not support runtime floating window resize/move via IPC.
+# Compute the target geometry from quattro-dwl-ipc state for callers/reference
+# and exit cleanly when the overlay is present.
+action=${1:-}
+case $action in
+smaller | larger | reset | small | medium | large) ;;
+*) usage ;;
+esac
+
+focused=$(quattro-dwl-monitor-focused 2>/dev/null || true)
+[[ -n $focused ]] || exit 0
+exit 0

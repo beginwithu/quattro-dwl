@@ -1,0 +1,8 @@
+#!/bin/bash
+
+# quattro:summary=Return exit status 0 when animations are disabled
+# quattro:group=dwl
+# quattro:name=animations off
+# quattro:hidden=true
+
+[[ -e "$HOME/.local/state/quattro/toggles/dwl/no-animations" ]]

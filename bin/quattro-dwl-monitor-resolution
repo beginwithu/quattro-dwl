@@ -1,0 +1,28 @@
+#!/bin/bash
+
+# quattro:summary=Configure monitor resolution and refresh rate in dwl config.toml (or config.h)
+# quattro:group=dwl
+# quattro:name=monitor resolution
+# quattro:args=[--monitor <name>] <WxH[@Hz]>
+
+set -euo pipefail
+
+MONITOR=""
+MODE=""
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --monitor|-m) MONITOR=${2:-}; shift 2 ;;
+    -h|--help)
+      echo "Usage: quattro-dwl-monitor-resolution [--monitor <name>] <WxH[@Hz]>"
+      exit 0
+      ;;
+    *) MODE=$1; shift ;;
+  esac
+done
+
+[[ -z $MONITOR ]] && MONITOR=$(quattro-dwl-monitor-focused)
+[[ -n $MONITOR && -n $MODE ]] || { echo "Usage: quattro-dwl-monitor-resolution [--monitor <name>] <WxH[@Hz]>" >&2; exit 1; }
+
+MODE=${MODE%Hz}
+quattro-dwl-monitor-persist --monitor "$MONITOR" --mode "$MODE"

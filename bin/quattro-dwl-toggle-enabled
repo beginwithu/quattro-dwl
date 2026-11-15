@@ -1,0 +1,9 @@
+#!/bin/bash
+
+# quattro:summary=Return exit status 0 if a dwl state toggle flag is enabled
+# quattro:group=dwl
+# quattro:name=toggle enabled
+# quattro:hidden=true
+
+NAME=${1:-}
+[[ -n $NAME && -e "$HOME/.local/state/quattro/toggles/dwl/$NAME" ]]

@@ -1,0 +1,201 @@
+# Runtime configuration for dwl (no recompile needed!)
+# Reload live anytime with: Super + Shift + R   (or: pkill -USR1 dwl)
+
+[appearance]
+sloppyfocus               = true
+bypass_surface_visibility = false
+smartgaps                 = false
+monoclegaps               = false
+borderpx                  = 2
+gappih                    = 4
+gappiv                    = 4
+gappoh                    = 4
+gappov                    = 4
+snap                      = 32
+adaptive_sync             = false
+log_level                 = "error"         # "silent" | "error" | "info" | "debug"
+rootcolor                 = "#1a1b26ff"
+bordercolor               = "#414868ff"
+focuscolor                = "#7aa2f7ff"
+urgentcolor               = "#f7768eff"
+fullscreen_bg             = "#000000ff"
+
+[keyboard]
+modkey       = "super"                      # "super" | "alt" | "ctrl" | "shift"
+repeat_rate  = 35
+repeat_delay = 250
+xkb_options  = ""
+
+[trackpad]
+tap_to_click            = true
+tap_and_drag            = true
+drag_lock               = true
+natural_scrolling       = false
+disable_while_typing    = true
+left_handed             = false
+middle_button_emulation = false
+scroll_method           = "2fg"             # "none" | "2fg" | "edge" | "button"
+click_method            = "button_areas"    # "none" | "button_areas" | "clickfinger"
+send_events_mode        = "enabled"         # "enabled" | "disabled" | "disabled_on_external_mouse"
+accel_profile           = "flat"        # "flat" | "adaptive"
+accel_speed             = 0.0
+button_map              = "lrm"             # "lrm" | "lmr"
+
+[window_rules]
+rules = [
+  { app_id = "org.pulseaudio.pavucontrol", floating = true },
+  { app_id = "pavucontrol",                floating = true },
+  { app_id = "localsend",                  floating = true },
+  { app_id = "org.gnome.baobab",           floating = true },
+  { app_id = "org.gnome.Calculator",       floating = true },
+  { app_id = "waypaper",                   floating = true },
+  { app_id = "blueman-manager",            floating = true },
+  { app_id = "nm-connection-editor",       floating = true },
+  { app_id = "blueberry.py",               floating = true },
+  { app_id = "xdg-desktop-portal-gtk",     floating = true },
+  { app_id = "quattro-floating",           floating = true },
+]
+
+[bindings]
+keys = [
+  # Applications & Quattro Menus
+  { mod = ["MODKEY"],                  key = "Return",     action = "spawn", arg = "quattro-launch-terminal",                                  desc = "Terminal" },
+  { mod = ["MODKEY", "ALT"],           key = "Return",     action = "spawn", arg = "quattro-launch-terminal-tmux",                             desc = "Tmux" },
+  { mod = ["MODKEY"],                  key = "space",      action = "spawn", arg = "quattro-menu",                                             desc = "Menu" },
+  { mod = ["MODKEY", "ALT"],           key = "space",      action = "spawn", arg = "quattro-shell quattro.dock apps || quattro-menu toggle apps", desc = "Apps" },
+  { mod = ["MODKEY", "SHIFT"],         key = "F",          action = "spawn", arg = "quattro-launch-files",                                     desc = "File manager" },
+  { mod = ["MODKEY", "SHIFT"],         key = "Return",     action = "spawn", arg = "quattro-launch-browser",                                   desc = "Browser" },
+  { mod = ["MODKEY", "SHIFT"],         key = "B",          action = "spawn", arg = "quattro-launch-browser",                                   desc = "Browser" },
+  { mod = ["MODKEY", "SHIFT", "ALT"],  key = "B",          action = "spawn", arg = "quattro-launch-browser --private",                         desc = "Browser (private)" },
+  { mod = ["MODKEY", "SHIFT"],         key = "M",          action = "spawn", arg = "quattro-launch-tui btop",                                  desc = "Activity" },
+  { mod = ["MODKEY", "SHIFT"],         key = "T",          action = "spawn", arg = "quattro-launch-tui --app-id=quattro-floating btop",         desc = "Btop" },
+  { mod = ["MODKEY"],                  key = "k",          action = "spawn", arg = "quattro-menu-keybindings",                                 desc = "Keybindings" },
+  { mod = ["MODKEY"],                  key = "slash",      action = "spawn", arg = "quattro-menu-keybindings",                                 desc = "Keybindings" },
+  { mod = ["MODKEY", "CTRL"],          key = "v",          action = "spawn", arg = "quattro-menu-clipboard",                                   desc = "Clipboard manager" },
+  { mod = ["MODKEY"],                  key = "period",     action = "spawn", arg = "quattro-menu-emoji",                                       desc = "Emojis" },
+  { mod = ["MODKEY", "CTRL"],          key = "e",          action = "spawn", arg = "quattro-menu-emoji",                                       desc = "Emojis" },
+  { mod = ["MODKEY"],                  key = "Escape",     action = "spawn", arg = "quattro-menu toggle system",                               desc = "System menu" },
+  { mod = ["MODKEY", "CTRL"],          key = "l",          action = "spawn", arg = "quattro-system-lock",                                      desc = "Lock system" },
+  { mod = ["MODKEY", "SHIFT"],         key = "space",      action = "spawn", arg = "quattro-toggle-bar",                                       desc = "Toggle top bar" },
+  { mod = ["MODKEY", "CTRL"],          key = "space",      action = "spawn", arg = "quattro-theme-bg-switcher --apply",                        desc = "Background switcher" },
+  { mod = ["MODKEY", "CTRL"],          key = "t",          action = "spawn", arg = "quattro-menu toggle theme",                                desc = "Theme menu" },
+  { mod = ["MODKEY", "CTRL"],          key = "s",          action = "spawn", arg = "quattro-menu toggle share",                                desc = "Share" },
+
+  # Notifications & Live Reload
+  { mod = ["MODKEY"],                  key = "comma",      action = "spawn", arg = "quattro-shell notifications act",                          desc = "Dismiss, invoke, or focus last notification" },
+  { mod = ["MODKEY", "ALT"],           key = "comma",      action = "spawn", arg = "quattro-shell notifications dismissOne",                   desc = "Dismiss last notification" },
+  { mod = ["MODKEY", "SHIFT"],         key = "comma",      action = "spawn", arg = "quattro-shell notifications dismissAll",                   desc = "Dismiss all notifications" },
+  { mod = ["MODKEY", "CTRL"],          key = "comma",      action = "spawn", arg = "quattro-shell notifications keyboard",                     desc = "Control notifications with the keyboard" },
+  { mod = ["MODKEY", "CTRL", "ALT"],   key = "comma",      action = "spawn", arg = "quattro-shell notifications toggleDnd",                    desc = "Toggle silencing notifications" },
+  { mod = ["MODKEY", "SHIFT"],         key = "R",          action = "reloadconfig",                                                            desc = "Reload config" },
+
+  # Capture & Color Picker
+  { mod = "NONE",                      key = "Print",      action = "spawn", arg = "quattro-capture-screenshot",                               desc = "Screenshot" },
+  { mod = ["SHIFT"],                   key = "Print",      action = "spawn", arg = "quattro-capture-screenshot region",                        desc = "Screenshot region" },
+  { mod = ["ALT"],                     key = "Print",      action = "spawn", arg = "quattro-capture-screenrecording",                          desc = "Screenrecording" },
+  { mod = ["MODKEY", "SHIFT"],         key = "S",          action = "spawn", arg = "quattro-capture-screenshot region",                        desc = "Screenshot region" },
+  { mod = ["MODKEY", "SHIFT"],         key = "P",          action = "spawn", arg = "quattro-color-picker",                                     desc = "Color picker" },
+
+  # Hardware & Media Keys
+  { mod = "NONE", key = "XF86AudioRaiseVolume",  action = "spawn", arg = "quattro-audio-output-volume raise",       desc = "Volume up" },
+  { mod = "NONE", key = "XF86AudioLowerVolume",  action = "spawn", arg = "quattro-audio-output-volume lower",       desc = "Volume down" },
+  { mod = "NONE", key = "XF86AudioMute",         action = "spawn", arg = "quattro-audio-output-volume mute-toggle", desc = "Mute" },
+  { mod = "NONE", key = "XF86AudioMicMute",      action = "spawn", arg = "quattro-audio-input-mute",                desc = "Mute microphone" },
+  { mod = "NONE", key = "XF86MonBrightnessUp",   action = "spawn", arg = "quattro-brightness-display +5%",          desc = "Brightness up" },
+  { mod = "NONE", key = "XF86MonBrightnessDown", action = "spawn", arg = "quattro-brightness-display 5%-",          desc = "Brightness down" },
+  { mod = "NONE", key = "XF86AudioPlay",         action = "spawn", arg = "quattro-shell media playPause",           desc = "Play" },
+  { mod = "NONE", key = "XF86AudioPause",        action = "spawn", arg = "quattro-shell media playPause",           desc = "Pause" },
+  { mod = "NONE", key = "XF86AudioNext",         action = "spawn", arg = "quattro-shell media next",                desc = "Next track" },
+  { mod = "NONE", key = "XF86AudioPrev",         action = "spawn", arg = "quattro-shell media previous",            desc = "Previous track" },
+
+  # Window Focus & Swapping
+  { mod = ["MODKEY"],          key = "Left",  action = "focusdir", arg = "left" },
+  { mod = ["MODKEY"],          key = "Right", action = "focusdir", arg = "right" },
+  { mod = ["MODKEY"],          key = "Up",    action = "focusdir", arg = "up" },
+  { mod = ["MODKEY"],          key = "Down",  action = "focusdir", arg = "down" },
+  { mod = ["MODKEY"],          key = "h",     action = "focusdir", arg = "left" },
+  { mod = ["MODKEY"],          key = "l",     action = "focusdir", arg = "right" },
+  { mod = ["MODKEY"],          key = "j",     action = "focusdir", arg = "down" },
+  { mod = ["MODKEY", "SHIFT"], key = "Left",  action = "swapdir",  arg = "left" },
+  { mod = ["MODKEY", "SHIFT"], key = "Right", action = "swapdir",  arg = "right" },
+  { mod = ["MODKEY", "SHIFT"], key = "Up",    action = "swapdir",  arg = "up" },
+  { mod = ["MODKEY", "SHIFT"], key = "Down",  action = "swapdir",  arg = "down" },
+  { mod = ["MODKEY", "SHIFT"], key = "H",     action = "swapdir",  arg = "left" },
+  { mod = ["MODKEY", "SHIFT"], key = "L",     action = "swapdir",  arg = "right" },
+  { mod = ["MODKEY", "SHIFT"], key = "K",     action = "swapdir",  arg = "up" },
+  { mod = ["MODKEY", "SHIFT"], key = "J",     action = "swapdir",  arg = "down" },
+
+  # Window Actions & Layouts
+  { mod = ["MODKEY"],                   key = "Tab",        action = "view",             arg = "prev" },
+  { mod = ["MODKEY"],                   key = "q",          action = "killclient" },
+  { mod = ["MODKEY"],                   key = "w",          action = "killclient" },
+  { mod = ["MODKEY"],                   key = "f",          action = "togglefullscreen" },
+  { mod = ["MODKEY"],                   key = "t",          action = "togglefloating" },
+  { mod = ["MODKEY"],                   key = "m",          action = "setlayout",        arg = "dwindle" },
+  { mod = ["MODKEY"],                   key = "n",          action = "setlayout",        arg = "tile" },
+  { mod = ["MODKEY"],                   key = "b",          action = "setlayout",        arg = "monocle" },
+  { mod = ["MODKEY", "ALT"],            key = "0",          action = "view",             arg = "all" },
+  { mod = ["MODKEY", "SHIFT", "ALT"],   key = "parenright", action = "tag",              arg = "all" },
+
+  # Session & VT Switching
+  { mod = ["MODKEY", "SHIFT"], key = "E",         action = "quit" },
+  { mod = ["CTRL", "ALT"],     key = "BackSpace", action = "quit" },
+  { mod = ["CTRL", "ALT"],     key = "F1",        action = "chvt", arg = 1 },
+  { mod = ["CTRL", "ALT"],     key = "F2",        action = "chvt", arg = 2 },
+  { mod = ["CTRL", "ALT"],     key = "F3",        action = "chvt", arg = 3 },
+  { mod = ["CTRL", "ALT"],     key = "F4",        action = "chvt", arg = 4 },
+  { mod = ["CTRL", "ALT"],     key = "F5",        action = "chvt", arg = 5 },
+  { mod = ["CTRL", "ALT"],     key = "F6",        action = "chvt", arg = 6 },
+  { mod = ["CTRL", "ALT"],     key = "F7",        action = "chvt", arg = 7 },
+  { mod = ["CTRL", "ALT"],     key = "F8",        action = "chvt", arg = 8 },
+  { mod = ["CTRL", "ALT"],     key = "F9",        action = "chvt", arg = 9 },
+  { mod = ["CTRL", "ALT"],     key = "F10",       action = "chvt", arg = 10 },
+  { mod = ["CTRL", "ALT"],     key = "F11",       action = "chvt", arg = 11 },
+  { mod = ["CTRL", "ALT"],     key = "F12",       action = "chvt", arg = 12 },
+]
+
+tagkeys = [
+  { key = "1", shift_key = "exclam",      tag = 1 },
+  { key = "2", shift_key = "at",          tag = 2 },
+  { key = "3", shift_key = "numbersign",  tag = 3 },
+  { key = "4", shift_key = "dollar",      tag = 4 },
+  { key = "5", shift_key = "percent",     tag = 5 },
+  { key = "6", shift_key = "asciicircum", tag = 6 },
+  { key = "7", shift_key = "ampersand",   tag = 7 },
+  { key = "8", shift_key = "asterisk",    tag = 8 },
+  { key = "9", shift_key = "parenleft",   tag = 9 },
+  { key = "0", shift_key = "parenright",  tag = 10 },
+]
+
+buttons = [
+  { mod = ["MODKEY"], button = "left",   action = "moveresize",     arg = "move" },
+  { mod = ["MODKEY"], button = "middle", action = "togglefloating" },
+  { mod = ["MODKEY"], button = "right",  action = "moveresize",     arg = "resize" },
+]
+
+# --- Monitors (kept as [[monitors]] blocks for Quattro monitor scripts) ---
+[[monitors]]
+name      = "HDMI-A-1"
+mfact     = 0.55
+nmaster   = 1
+width     = 1920
+height    = 1080
+refresh   = 100.0
+scale     = 1.0
+layout    = "dwindle"                       # "dwindle" | "floating" | "tile" | "monocle"
+transform = "normal"                        # "normal" | "90" | "180" | "270" | "flipped" | ...
+x         = 0
+y         = 0
+
+[[monitors]]
+name      = "*"
+mfact     = 0.55
+nmaster   = 1
+width     = 0
+height    = 0
+refresh   = 0.0
+scale     = 1.0
+layout    = "dwindle"
+transform = "normal"
+x         = -1
+y         = -1

@@ -1,0 +1,57 @@
+#!/bin/bash
+
+# quattro:summary=Toggle nightlight screen temperature via wlsunset
+# quattro:args=[--status]
+# quattro:examples=quattro toggle nightlight
+
+set -euo pipefail
+
+ON_TEMP=4000
+OFF_TEMP=6500
+IDENTITY_TEMP=6000
+STATE_FILE="$HOME/.local/state/quattro/nightlight.on"
+
+current_temp() {
+  if pgrep -x wlsunset >/dev/null 2>&1 || [[ -f $STATE_FILE ]]; then
+    local val=""
+    val=$(cat "$STATE_FILE" 2>/dev/null || true)
+    if [[ $val =~ ^[0-9]+$ ]]; then
+      printf '%s\n' "$val"
+    else
+      printf '%s\n' "$ON_TEMP"
+    fi
+  else
+    printf '%s\n' "$OFF_TEMP"
+  fi
+}
+
+status_json() {
+  local temp enabled
+  temp=$(current_temp)
+  if (( temp < IDENTITY_TEMP )); then
+    enabled=true
+  else
+    enabled=false
+  fi
+  jq -cn --argjson enabled "$enabled" --arg temp "$temp" \
+    '{enabled:$enabled, temperature:(($temp | tonumber?) // null)}'
+}
+
+if [[ ${1:-} == "--status" ]]; then
+  status_json
+  exit 0
+fi
+
+CURRENT_TEMP=$(current_temp)
+
+if (( CURRENT_TEMP < IDENTITY_TEMP )); then
+  rm -f "$STATE_FILE"
+  pkill -x wlsunset >/dev/null 2>&1 || true
+else
+  mkdir -p "${STATE_FILE%/*}"
+  printf '%s\n' "$ON_TEMP" >"$STATE_FILE"
+  pkill -x wlsunset >/dev/null 2>&1 || true
+  nohup wlsunset -t "$ON_TEMP" -T "$((ON_TEMP + 1))" -S 00:00 -s 00:01 -d 0 >/dev/null 2>&1 &
+fi
+
+quattro-shell -q nightlight refresh >/dev/null 2>&1 || true

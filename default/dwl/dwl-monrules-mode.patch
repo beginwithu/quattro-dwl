@@ -1,0 +1,91 @@
+--- a/dwl.c
++++ b/dwl.c
+@@ -247,6 +247,9 @@
+ 	const char *name;
+ 	float mfact;
+ 	int nmaster;
++	int resx;
++	int resy;
++	float refresh;
+ 	float scale;
+ 	const Layout *lt;
+ 	enum wl_output_transform rr;
+@@ -304,6 +307,7 @@
+ static void createlayersurface(struct wl_listener *listener, void *data);
+ static void createlocksurface(struct wl_listener *listener, void *data);
+ static void createmon(struct wl_listener *listener, void *data);
++static struct wlr_output_mode *pickmonmode(struct wlr_output *wlr_output, const MonitorRule *r);
+ static void createnotify(struct wl_listener *listener, void *data);
+ static void createpointer(struct wlr_pointer *pointer);
+ static void createpointerconstraint(struct wl_listener *listener, void *data);
+@@ -1325,6 +1329,7 @@
+ 	wlr_output_state_init(&state);
+ 	/* Initialize monitor state using configured rules */
+ 	m->tagset[0] = m->tagset[1] = 1;
++	r = NULL;
+ 	for (r = monrules; r < END(monrules); r++) {
+ 		if (!r->name || strstr(wlr_output->name, r->name)) {
+ 			m->m.x = r->x;
+@@ -1352,7 +1357,7 @@
+ 	/* Some monitors disconnect when they are turned off and reconnect shortly
+ 	 * after, so keep outputs that were turned off disabled. */
+ 	if (!monoff(wlr_output)) {
+-		wlr_output_state_set_mode(&state, wlr_output_preferred_mode(wlr_output));
++		wlr_output_state_set_mode(&state, pickmonmode(wlr_output, r < END(monrules) ? r : NULL));
+ 		wlr_output_state_set_enabled(&state, 1);
+ 	}
+ 	wlr_output_commit_state(wlr_output, &state);
+@@ -2857,6 +2862,44 @@
+ 				printstatus_flush, NULL);
+ }
+ 
++struct wlr_output_mode *
++pickmonmode(struct wlr_output *wlr_output, const MonitorRule *r)
++{
++	struct wlr_output_mode *mode, *best = NULL;
++	int target_mhz, best_diff = 0, diff;
++
++	if (!r) {
++		for (r = monrules; r < END(monrules); r++) {
++			if (!r->name || strstr(wlr_output->name, r->name))
++				break;
++		}
++		if (r >= END(monrules))
++			r = NULL;
++	}
++
++	if (r && r->resx > 0 && r->resy > 0) {
++		target_mhz = r->refresh > 0.0f ? (int)(r->refresh * 1000.0f + 0.5f) : 0;
++		wl_list_for_each(mode, &wlr_output->modes, link) {
++			if (mode->width != r->resx || mode->height != r->resy)
++				continue;
++			if (target_mhz <= 0) {
++				if (!best || mode->preferred || mode->refresh > best->refresh)
++					best = mode;
++			} else {
++				diff = mode->refresh - target_mhz;
++				if (diff < 0)
++					diff = -diff;
++				if (!best || diff < best_diff) {
++					best = mode;
++					best_diff = diff;
++				}
++			}
++		}
++	}
++
++	return best ? best : wlr_output_preferred_mode(wlr_output);
++}
++
+ void
+ powermgrsetmode(struct wl_listener *listener, void *data)
+ {
+@@ -2871,7 +2914,7 @@
+ 	wlr_output_state_set_enabled(&state, event->mode);
+ 	/* The output was reconnected while off and was never modeset */
+ 	if (event->mode && !m->wlr_output->current_mode)
+-		wlr_output_state_set_mode(&state, wlr_output_preferred_mode(m->wlr_output));
++		wlr_output_state_set_mode(&state, pickmonmode(m->wlr_output, NULL));
+ 	setmonoff(m->wlr_output, !event->mode);
+ 	wlr_output_commit_state(m->wlr_output, &state);
+ 

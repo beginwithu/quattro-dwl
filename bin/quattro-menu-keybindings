@@ -1,0 +1,325 @@
+#!/bin/bash
+
+# quattro:summary=Display dwl keybindings defined in your configuration using an interactive search menu.
+
+CFG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/dwl"
+if [[ -f "$CFG_DIR/config.toml" ]]; then
+  CONFIG_FILE="$CFG_DIR/config.toml"
+elif [[ -f "$CFG_DIR/config.h" ]]; then
+  CONFIG_FILE="$CFG_DIR/config.h"
+elif [[ -f "$QUATTRO_PATH/config/dwl/config.toml" ]]; then
+  CONFIG_FILE="$QUATTRO_PATH/config/dwl/config.toml"
+else
+  CONFIG_FILE="$QUATTRO_PATH/config/dwl/config.h"
+fi
+
+list_records() {
+  python3 - "$CONFIG_FILE" "${QUATTRO_PATH:-/usr/share/quattro}" "$(quattro-language 2>/dev/null || echo en)" <<'PYEOF'
+import json
+import os
+import re
+import shlex
+import sys
+import tomllib
+
+config_path, quattro_path, lang = sys.argv[1:4]
+if not os.path.isfile(config_path):
+    sys.exit(0)
+
+text = open(config_path, encoding="utf-8", errors="replace").read()
+
+i18n_path = os.path.join(quattro_path, "default", "i18n", lang, "keybindings.json")
+if not os.path.isfile(i18n_path):
+    i18n_path = os.path.join(quattro_path, "default", "i18n", "en", "keybindings.json")
+try:
+    i18n = json.load(open(i18n_path, encoding="utf-8"))
+except Exception:
+    i18n = {}
+
+modkey = "Super"
+m = re.search(r"#define\s+MODKEY\s+(WLR_MODIFIER_\w+)", text)
+if m:
+    mod_map = {
+        "WLR_MODIFIER_LOGO": "Super",
+        "WLR_MODIFIER_ALT": "Alt",
+        "WLR_MODIFIER_CTRL": "Ctrl",
+        "WLR_MODIFIER_SHIFT": "Shift",
+    }
+    modkey = mod_map.get(m.group(1), "Super")
+
+def format_mods(expr: str) -> str:
+    tokens = [t.strip() for t in expr.split("|") if t.strip() and t.strip() != "0"]
+    mapping = {
+        "MODKEY": modkey,
+        "WLR_MODIFIER_LOGO": "Super",
+        "WLR_MODIFIER_ALT": "Alt",
+        "WLR_MODIFIER_CTRL": "Ctrl",
+        "WLR_MODIFIER_SHIFT": "Shift",
+        "WLR_MODIFIER_MOD2": "Mod2",
+        "WLR_MODIFIER_MOD3": "Mod3",
+        "WLR_MODIFIER_MOD5": "Mod5",
+    }
+    out = [mapping.get(t, t) for t in tokens]
+    return " + ".join(out)
+
+key_aliases = {
+    "Return": "Return",
+    "BackSpace": "BackSpace",
+    "space": "Space",
+    "comma": ",",
+    "period": ".",
+    "slash": "/",
+    "grave": "`",
+    "Tab": "Tab",
+    "Escape": "Esc",
+    "Print": "Print",
+    "parenright": ")",
+    "exclam": "!",
+    "at": "@",
+    "numbersign": "#",
+    "dollar": "$",
+    "percent": "%",
+    "asciicircum": "^",
+    "ampersand": "&",
+    "asterisk": "*",
+    "parenleft": "(",
+}
+
+def format_key(sym: str) -> str:
+    sym = sym.removeprefix("XKB_KEY_")
+    return key_aliases.get(sym, sym)
+
+action_descriptions = {
+    ("focusdir", "0"): "Focus on left window",
+    ("focusdir", "1"): "Focus on right window",
+    ("focusdir", "2"): "Focus on above window",
+    ("focusdir", "3"): "Focus on below window",
+    ("swapdir", "0"): "Swap window left",
+    ("swapdir", "1"): "Swap window right",
+    ("swapdir", "2"): "Swap window up",
+    ("swapdir", "3"): "Swap window down",
+    ("view", "{0}"): "Former workspace",
+    ("view", "~0"): "View all tags",
+    ("tag", "~0"): "Tag window on all workspaces",
+    ("killclient", "{0}"): "Close window",
+    ("togglefullscreen", "{0}"): "Full screen",
+    ("togglefloating", "{0}"): "Toggle floating",
+    ("setlayout", "0"): "Switch to dwindle layout",
+    ("setlayout", "2"): "Switch to tile layout",
+    ("setlayout", "3"): "Switch to monocle layout",
+    ("quit", "{0}"): "Quit dwl",
+    ("reloadconfig", "{0}"): "Reload configuration",
+    ("reloadconfig", ""): "Reload configuration",
+}
+
+spawn_descriptions = {
+    "quattro-launch-terminal": "Terminal",
+    "quattro-launch-terminal-tmux": "Tmux",
+    "quattro-menu": "Menu",
+    "quattro-shell quattro.dock apps": "Apps",
+    "quattro-shell quattro.dock apps || quattro-menu toggle apps": "Apps",
+    "quattro-menu toggle apps": "Apps",
+    "quattro-launch-files": "File manager",
+    "quattro-launch-browser": "Browser",
+    "quattro-launch-browser --private": "Browser (private)",
+    "quattro-launch-tui btop": "Activity",
+    "quattro-menu-keybindings": "Keybindings",
+    "quattro-menu-clipboard": "Clipboard manager",
+    "quattro-menu-emoji": "Emojis",
+    "quattro-menu toggle system": "System menu",
+    "quattro-menu system": "System menu",
+    "quattro-system-lock": "Lock system",
+    "quattro-toggle-bar": "Toggle top bar",
+    "quattro-theme-bg-switcher --apply": "Background switcher",
+    "quattro-theme-bg-next": "Next background",
+    "quattro-menu toggle theme": "Theme menu",
+    "quattro-menu theme": "Theme menu",
+    "quattro-shell notifications act": "Dismiss, invoke, or focus last notification",
+    "quattro-shell notifications dismissOne": "Dismiss last notification",
+    "quattro-shell notifications dismissAll": "Dismiss all notifications",
+    "quattro-shell notifications keyboard": "Control notifications with the keyboard",
+    "quattro-shell notifications toggleDnd": "Toggle silencing notifications",
+    "quattro-capture-screenshot": "Screenshot",
+    "quattro-capture-screenshot region": "Screenshot region",
+    "quattro-capture-screenrecording": "Screenrecording",
+    "quattro-color-picker": "Color picker",
+    "quattro-audio-output-volume raise": "Volume up",
+    "quattro-audio-output-volume lower": "Volume down",
+    "quattro-audio-output-volume mute-toggle": "Mute",
+    "quattro-audio-input-mute": "Mute microphone",
+    "quattro-brightness-display +5%": "Brightness up",
+    "quattro-brightness-display 5%-": "Brightness down",
+    "quattro-shell media playPause": "Play / Pause",
+    "quattro-shell media next": "Next track",
+    "quattro-shell media previous": "Previous track",
+}
+
+def clean_desc(label: str) -> str:
+    text = i18n.get(label, label)
+    text = re.sub(r"\bquattro\b[\s_-]*", "", text, flags=re.IGNORECASE).strip()
+    if text:
+        text = text[0].upper() + text[1:]
+    return text or label
+
+raw_records = []
+if config_path.endswith(".toml"):
+    with open(config_path, "rb") as f:
+        data = tomllib.load(f)
+    kb = data.get("keyboard") or {}
+    mod_raw = str(kb.get("modkey", "super")).upper()
+    if mod_raw in ("LOGO", "WIN", "MOD4", "SUPER", "MODKEY"):
+        mod_name = "Super"
+    else:
+        mod_name = mod_raw.title()
+    mod_map = {
+        "MODKEY": mod_name,
+        "SUPER": "Super",
+        "LOGO": "Super",
+        "WIN": "Super",
+        "ALT": "Alt",
+        "MOD1": "Alt",
+        "CTRL": "Ctrl",
+        "CONTROL": "Ctrl",
+        "SHIFT": "Shift",
+        "NONE": "",
+    }
+
+    def fmt_toml_mods(mval):
+        if isinstance(mval, list):
+            toks = [str(x).strip() for x in mval]
+        else:
+            toks = [t.strip() for t in re.split(r"[+|,\s]+", str(mval or "")) if t.strip()]
+        out = [mod_map.get(t.upper(), t.title()) for t in toks if t.upper() not in ("NONE", "0", "")]
+        return " + ".join(out)
+
+    bindings = data.get("bindings") or {}
+    for entry in (data.get("keys") or bindings.get("keys") or []):
+        mods = fmt_toml_mods(entry.get("mod"))
+        key = format_key(str(entry.get("key", "")))
+        if not key:
+            continue
+        combo = f"{mods} + {key}" if mods else key
+        action = str(entry.get("action", "")).strip()
+        custom_desc = str(entry.get("desc") or entry.get("description") or "").strip()
+        if action == "spawn":
+            args = entry.get("args")
+            if isinstance(args, list) and args:
+                cmd = " ".join(shlex.quote(str(a)) for a in args)
+            else:
+                cmd = str(entry.get("arg", "")).strip()
+            if cmd:
+                label = custom_desc or spawn_descriptions.get(cmd, cmd)
+                raw_records.append((combo, clean_desc(label), "exec", cmd))
+        elif action == "view":
+            arg = entry.get("arg", "")
+            if str(arg).lower() == "all":
+                raw_records.append((combo, clean_desc(custom_desc or "View all tags"), "view", "~0"))
+            elif str(arg).lower() == "prev" or str(arg) == "0":
+                raw_records.append((combo, clean_desc(custom_desc or "Former workspace"), "view", "0"))
+            elif "tag" in entry:
+                ws = int(entry["tag"])
+                raw_records.append((combo, f"Switch to workspace {ws}", "ipc", f"tag {1 << (ws - 1)}"))
+        elif action == "tag":
+            arg = entry.get("arg", "")
+            if str(arg).lower() == "all":
+                raw_records.append((combo, clean_desc(custom_desc or "Tag window on all workspaces"), "tag", "~0"))
+            elif "tag" in entry:
+                raw_records.append((combo, f"Tag window {entry['tag']}", "tag", str(entry["tag"])))
+        elif action == "setlayout":
+            lmap = {"dwindle": ("0", "Switch to dwindle layout"), "floating": ("1", "Switch to floating layout"), "tile": ("2", "Switch to tile layout"), "monocle": ("3", "Switch to monocle layout")}
+            idx, label = lmap.get(str(entry.get("arg", "")).lower(), ("0", "Switch layout"))
+            raw_records.append((combo, clean_desc(custom_desc or label), "ipc", f"layout {idx}"))
+        elif action in ("focusdir", "swapdir"):
+            dmap = {"left": "0", "right": "1", "up": "2", "down": "3"}
+            dv = dmap.get(str(entry.get("arg", "0")).lower(), str(entry.get("arg", "0")))
+            desc = custom_desc or action_descriptions.get((action, dv), f"{action} {dv}")
+            raw_records.append((combo, clean_desc(desc), action, dv))
+        elif action:
+            arg = str(entry.get("arg", "")).strip()
+            desc = custom_desc or action_descriptions.get((action, arg if arg else "{0}"), action_descriptions.get((action, "{0}"), action))
+            raw_records.append((combo, clean_desc(desc), action, arg or "0"))
+
+    for tk in (data.get("tagkeys") or bindings.get("tagkeys") or []):
+        ws = int(tk.get("tag", 0))
+        k1 = format_key(str(tk.get("key", "")))
+        if ws >= 1 and k1:
+            raw_records.append((f"{mod_name} + {k1}", f"Switch to workspace {ws}", "ipc", f"tag {1 << (ws - 1)}"))
+else:
+    keys_block = re.search(r"static const Key keys\[\]\s*=\s*\{(.*?)\n\};", text, re.S)
+    if keys_block:
+        body = keys_block.group(1)
+        shcmd_pat = re.compile(
+            r'\{\s*([^,{}]+?)\s*,\s*(XKB_KEY_\w+)\s*,\s*spawn\s*,\s*SHCMD\(\s*"((?:[^"\\]|\\.)*)"\s*\)\s*\}'
+        )
+        fn_pat = re.compile(
+            r'\{\s*([^,{}]+?)\s*,\s*(XKB_KEY_\w+)\s*,\s*(\w+)\s*,\s*\{([^{}]*)\}\s*\}'
+        )
+        tag_pat = re.compile(r'TAGKEYS\(\s*(XKB_KEY_\w+)\s*,\s*(XKB_KEY_\w+)\s*,\s*(\d+)\s*\)')
+
+        for line in body.splitlines():
+            m_sh = shcmd_pat.search(line)
+            if m_sh:
+                mods_raw, key_raw, cmd = m_sh.groups()
+                combo = f"{format_mods(mods_raw)} + {format_key(key_raw)}" if format_mods(mods_raw) else format_key(key_raw)
+                cmd = cmd.replace('\\"', '"')
+                raw_records.append((combo, clean_desc(spawn_descriptions.get(cmd, cmd)), "exec", cmd))
+                continue
+
+            m_fn = fn_pat.search(line)
+            if m_fn:
+                mods_raw, key_raw, fn, arg = m_fn.groups()
+                combo = f"{format_mods(mods_raw)} + {format_key(key_raw)}" if format_mods(mods_raw) else format_key(key_raw)
+                arg_clean = arg.strip()
+                if ".ui =" in arg_clean:
+                    val = arg_clean.split("=", 1)[1].strip()
+                    desc = action_descriptions.get((fn, val), f"{fn} {val}")
+                    if fn == "view" and val != "~0":
+                        raw_records.append((combo, clean_desc(desc), "ipc", f"tag {val}"))
+                    else:
+                        raw_records.append((combo, clean_desc(desc), fn, val))
+                elif "&layouts[" in arg_clean:
+                    idx = arg_clean.split("&layouts[", 1)[1].split("]", 1)[0]
+                    desc = action_descriptions.get((fn, idx), f"{fn} layout {idx}")
+                    raw_records.append((combo, clean_desc(desc), "ipc", f"layout {idx}"))
+                else:
+                    desc = action_descriptions.get((fn, "{0}" if arg_clean == "0" else arg_clean), fn)
+                    raw_records.append((combo, clean_desc(desc), fn, arg_clean))
+                continue
+
+            m_tag = tag_pat.search(line)
+            if m_tag:
+                k1, _, idx = m_tag.groups()
+                ws = int(idx) + 1
+                mask = 1 << int(idx)
+                raw_records.append((f"{modkey} + {format_key(k1)}", f"Switch to workspace {ws}", "ipc", f"tag {mask}"))
+
+for combo, desc, kind, arg in raw_records:
+    print(f"{combo}\t→ {desc}\t{kind}\t{arg}")
+PYEOF
+}
+
+if [[ ${1:-} == "--print" || ${1:-} == "-p" ]]; then
+  list_records | awk -F '\t' '{ gap = 42 - length($1); if (gap < 4) gap = 4; printf "%s%*s%s\n", $1, gap, "", $2 }'
+  exit 0
+fi
+
+records=$(list_records)
+selection=$(cut -f1,2 <<<"$records" | quattro-menu-select "$(quattro-i18n keybindings.title 2>/dev/null || echo Keybindings)" -- --two-column --width 900 --height 500)
+[[ -n $selection ]] || exit 0
+
+record=$(awk -F '\t' -v selection="$selection" '($1 "\t" $2) == selection { print; exit }' <<<"$records")
+kind=$(cut -f3 <<<"$record")
+arg=$(cut -f4- <<<"$record")
+
+case "$kind" in
+exec)
+  [[ -n $arg ]] && setsid -f bash -lc "$arg" >/dev/null 2>&1
+  ;;
+ipc)
+  # shellcheck disable=SC2086
+  [[ -n $arg ]] && quattro-dwl-ipc $arg >/dev/null 2>&1 || true
+  ;;
+*)
+  quattro-notification-send "dwl binding '$kind' can be triggered via its key combo" >/dev/null 2>&1 || true
+  ;;
+esac

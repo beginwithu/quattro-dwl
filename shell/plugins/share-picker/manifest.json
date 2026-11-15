@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "quattro.share-picker",
+  "name": "Share picker",
+  "version": "1.0.0",
+  "author": "Quattro",
+  "description": "Screen, window, tag, and region share picker with live previews.",
+  "kinds": [
+    "overlay"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "SharePicker.qml"
+  }
+}

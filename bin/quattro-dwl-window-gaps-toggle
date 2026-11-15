@@ -1,0 +1,9 @@
+#!/bin/bash
+
+# quattro:summary=Toggle Quattro shell edge gap flag for fullscreen desktop mode
+# quattro:group=dwl
+# quattro:name=window gaps toggle
+
+set -euo pipefail
+
+quattro-dwl-toggle window-no-gaps toggle

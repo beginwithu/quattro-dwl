@@ -1,0 +1,39 @@
+#!/bin/bash
+
+# quattro:summary=Configure dwl output rotation in config.toml (or config.h)
+# quattro:group=dwl
+# quattro:name=monitor rotate
+# quattro:args=[--monitor <name>] [0|90|180|270|normal]
+
+set -euo pipefail
+
+MONITOR=""
+ROTATION=""
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --monitor|-m) MONITOR=${2:-}; shift 2 ;;
+    -h|--help)
+      echo "Usage: quattro-dwl-monitor-rotate [--monitor <name>] <0|90|180|270|normal>"
+      exit 0
+      ;;
+    *) ROTATION=$1; shift ;;
+  esac
+done
+
+[[ -z $MONITOR ]] && MONITOR=$(quattro-dwl-monitor-focused)
+[[ -z $MONITOR ]] && exit 1
+
+case ${ROTATION:-90} in
+  0|normal)   TRANSFORM="normal" ;;
+  90)         TRANSFORM="90" ;;
+  180)        TRANSFORM="180" ;;
+  270)        TRANSFORM="270" ;;
+  flipped|flipped-90|flipped-180|flipped-270) TRANSFORM="$ROTATION" ;;
+  *)
+    echo "Unsupported rotation: $ROTATION" >&2
+    exit 1
+    ;;
+esac
+
+quattro-dwl-monitor-persist --monitor "$MONITOR" --transform "$TRANSFORM"

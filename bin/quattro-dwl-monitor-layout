@@ -1,0 +1,21 @@
+#!/bin/bash
+
+# quattro:summary=Persist display coordinates across dwl outputs in config.toml (or config.h)
+# quattro:group=dwl
+# quattro:name=monitor layout
+# quattro:args=<NAME=XxY> ...
+
+set -euo pipefail
+
+if [[ ${1:-} == "-h" || ${1:-} == "--help" || $# -eq 0 ]]; then
+  echo "Usage: quattro-dwl-monitor-layout <NAME=XxY> ..."
+  exit 0
+fi
+
+for spec in "$@"; do
+  name=${spec%%=*}
+  coords=${spec#*=}
+  x=${coords%%x*}
+  y=${coords#*x}
+  quattro-dwl-monitor-persist --monitor "$name" --pos "${x},${y}"
+done

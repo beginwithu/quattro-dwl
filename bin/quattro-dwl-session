@@ -1,0 +1,87 @@
+#!/bin/bash
+# quattro:group=dwl
+# quattro:name=session
+# quattro:summary=Start a dwl session with Quattro environment initialized
+
+set -euo pipefail
+
+export QUATTRO_PATH="${QUATTRO_PATH:-$HOME/.local/share/quattro}"
+export PATH="$HOME/.local/bin:$QUATTRO_PATH/bin:/usr/local/bin:$PATH"
+export XDG_CURRENT_DESKTOP="${XDG_CURRENT_DESKTOP:-wlroots}"
+export XDG_SESSION_TYPE="wayland"
+export XDG_SESSION_DESKTOP="${XDG_SESSION_DESKTOP:-wlroots}"
+export QUATTRO_SESSION_ID="${QUATTRO_SESSION_ID:-$(date +%s)-$$}"
+export XCURSOR_SIZE="${XCURSOR_SIZE:-24}"
+export GDK_BACKEND="${GDK_BACKEND:-wayland,x11,*}"
+export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland;xcb}"
+export MOZ_ENABLE_WAYLAND="${MOZ_ENABLE_WAYLAND:-1}"
+export ELECTRON_OZONE_PLATFORM_HINT="${ELECTRON_OZONE_PLATFORM_HINT:-wayland}"
+export OZONE_PLATFORM="${OZONE_PLATFORM:-wayland}"
+export XCOMPOSEFILE="${XCOMPOSEFILE:-$HOME/.XCompose}"
+
+# Ensure XWayland X11 GLX/EGL clients (e.g. glxgears, Minecraft) are not forced onto Wayland EGL.
+unset EGL_PLATFORM
+
+if [[ -z ${QT_QPA_PLATFORMTHEME:-} ]]; then
+  if [[ -r /usr/lib/qt6/plugins/platformthemes/libqtengine.so || -r /usr/lib/qt/plugins/platformthemes/libqtengine.so ]]; then
+    export QT_QPA_PLATFORMTHEME=qtengine
+  elif [[ -r /usr/lib/qt6/plugins/platformthemes/libqt6ct.so ]]; then
+    export QT_QPA_PLATFORMTHEME=qt6ct
+  fi
+fi
+
+if [[ -r "$QUATTRO_PATH/default/bash/env-bootstrap" ]]; then
+  . "$QUATTRO_PATH/default/bash/env-bootstrap"
+fi
+if [[ -r "$QUATTRO_PATH/default/uwsm/default" ]]; then
+  . "$QUATTRO_PATH/default/uwsm/default"
+fi
+if [[ -r "$HOME/.config/uwsm/default" ]]; then
+  . "$HOME/.config/uwsm/default"
+fi
+
+# Hardware-specific NVIDIA settings for XWayland GLX and VA-API
+if command -v quattro-hw-nvidia >/dev/null 2>&1 && quattro-hw-nvidia; then
+  nvidia_is_display=0
+  if command -v quattro-hw-nvidia-display >/dev/null 2>&1 && quattro-hw-nvidia-display; then
+    nvidia_is_display=1
+  fi
+  if command -v quattro-hw-nvidia-gsp >/dev/null 2>&1 && quattro-hw-nvidia-gsp; then
+    export NVD_BACKEND="${NVD_BACKEND:-direct}"
+    if (( nvidia_is_display )); then
+      export LIBVA_DRIVER_NAME="${LIBVA_DRIVER_NAME:-nvidia}"
+      export __GLX_VENDOR_LIBRARY_NAME="${__GLX_VENDOR_LIBRARY_NAME:-nvidia}"
+    fi
+  elif command -v quattro-hw-nvidia-without-gsp >/dev/null 2>&1 && quattro-hw-nvidia-without-gsp; then
+    export NVD_BACKEND="${NVD_BACKEND:-egl}"
+    if (( nvidia_is_display )); then
+      export __GLX_VENDOR_LIBRARY_NAME="${__GLX_VENDOR_LIBRARY_NAME:-nvidia}"
+    fi
+  fi
+fi
+
+DWL_BIN=$(command -v dwl || true)
+if [[ -z $DWL_BIN && -x /usr/local/bin/dwl ]]; then
+  DWL_BIN=/usr/local/bin/dwl
+elif [[ -z $DWL_BIN && -x "$HOME/Projects/dwl/dwl" ]]; then
+  DWL_BIN="$HOME/Projects/dwl/dwl"
+fi
+
+if [[ -z $DWL_BIN ]]; then
+  echo "quattro-dwl-session: dwl binary not found in PATH, /usr/local/bin/dwl, or ~/Projects/dwl/dwl" >&2
+  exit 1
+fi
+
+has_startup_arg=0
+for arg in "$@"; do
+  if [[ $arg == "-s" ]]; then
+    has_startup_arg=1
+    break
+  fi
+done
+
+if (( has_startup_arg )); then
+  exec "$DWL_BIN" "$@"
+else
+  exec "$DWL_BIN" -s "$QUATTRO_PATH/bin/quattro-launch-shell" "$@"
+fi

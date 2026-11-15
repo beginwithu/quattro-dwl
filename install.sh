@@ -1,0 +1,436 @@
+#!/bin/bash
+
+set -euo pipefail
+
+PROJECT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+
+if [[ ${1:-} == "-h" || ${1:-} == "--help" ]]; then
+  cat <<'EOF'
+Usage: ./install.sh
+
+Installs minimal Quattro core packages (Arch [core]/[extra]), runtime, user
+configs, Tokyo Night theme, and system-wide session/environment files.
+No flags needed.
+EOF
+  exit 0
+fi
+
+if (( $# > 0 )); then
+  echo "Usage: ./install.sh (runs full install with no flags)" >&2
+  exit 1
+fi
+
+SANDBOX=false
+if [[ ${QUATTRO_INSTALL_SANDBOX:-0} == "1" ]]; then
+  SANDBOX=true
+elif (( EUID == 0 )); then
+  echo "Run ./install.sh as your normal user (it will prompt for sudo when needed), not as root." >&2
+  exit 1
+fi
+
+THEME="Tokyo Night"
+INSTALL_DIR="$HOME/.local/share/quattro"
+BIN_LINK_DIR="$HOME/.local/bin"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+setup_cachyos_repos() {
+  echo -e "${YELLOW}Detecting CPU architecture...${NC}"
+
+  local ARCH
+  if grep -q "x86-64-v4" /proc/cpuinfo 2>/dev/null || /lib/ld-linux-x86-64.so.2 --help 2>/dev/null | grep -q "x86-64-v4"; then
+    ARCH="v4"
+    echo -e "${GREEN}Detected: x86-64-v4${NC}"
+  elif grep -q "x86-64-v3" /proc/cpuinfo 2>/dev/null || /lib/ld-linux-x86-64.so.2 --help 2>/dev/null | grep -q "x86-64-v3"; then
+    ARCH="v3"
+    echo -e "${GREEN}Detected: x86-64-v3${NC}"
+  else
+    ARCH="v2"
+    echo -e "${GREEN}Detected: x86-64 (baseline)${NC}"
+  fi
+
+  echo -e "${YELLOW}Importing CachyOS signing key...${NC}"
+  sudo pacman-key --recv-keys F3B607488DB35A47 --keyserver keyserver.ubuntu.com
+  sudo pacman-key --lsign-key F3B607488DB35A47
+
+  echo -e "${YELLOW}Installing CachyOS keyring and mirrorlists...${NC}"
+  sudo pacman -U --noconfirm \
+    "https://mirror.cachyos.org/repo/x86_64/cachyos/cachyos-keyring-20240331-1-any.pkg.tar.zst" \
+    "https://mirror.cachyos.org/repo/x86_64/cachyos/cachyos-mirrorlist-27-1-any.pkg.tar.zst" \
+    "https://mirror.cachyos.org/repo/x86_64/cachyos/cachyos-v3-mirrorlist-27-1-any.pkg.tar.zst" \
+    "https://mirror.cachyos.org/repo/x86_64/cachyos/cachyos-v4-mirrorlist-27-1-any.pkg.tar.zst"
+
+  echo -e "${YELLOW}Configuring repositories in pacman.conf...${NC}"
+
+  local REPO_CONFIG=""
+  if [[ "$ARCH" == "v4" ]]; then
+    REPO_CONFIG="[cachyos-v4]
+Include = /etc/pacman.d/cachyos-v4-mirrorlist
+
+[cachyos-core-v4]
+Include = /etc/pacman.d/cachyos-v4-mirrorlist
+
+[cachyos-extra-v4]
+Include = /etc/pacman.d/cachyos-v4-mirrorlist
+
+"
+  elif [[ "$ARCH" == "v3" ]]; then
+    REPO_CONFIG="[cachyos-v3]
+Include = /etc/pacman.d/cachyos-v3-mirrorlist
+
+[cachyos-core-v3]
+Include = /etc/pacman.d/cachyos-v3-mirrorlist
+
+[cachyos-extra-v3]
+Include = /etc/pacman.d/cachyos-v3-mirrorlist
+
+"
+  fi
+
+  REPO_CONFIG="${REPO_CONFIG}[cachyos]
+Include = /etc/pacman.d/cachyos-mirrorlist"
+
+  if ! grep -q "\[cachyos\]" /etc/pacman.conf; then
+    sudo cp /etc/pacman.conf /etc/pacman.conf.bak
+    echo -e "\n${REPO_CONFIG}" | sudo tee -a /etc/pacman.conf >/dev/null
+    echo -e "${GREEN}Repositories added to pacman.conf${NC}"
+  else
+    echo -e "${YELLOW}CachyOS repositories already configured${NC}"
+  fi
+
+  echo -e "${YELLOW}Syncing package databases...${NC}"
+  sudo pacman -Sy
+}
+
+install_packages() {
+  local -a pkgs=()
+  mapfile -t pkgs < <(grep -hvE '^[[:space:]]*(#|$)' "$PROJECT_DIR/packages/arch-core.packages")
+
+  if (( ${#pkgs[@]} > 0 )); then
+    echo "==> Installing core Arch packages via pacman..."
+    sudo pacman -S --needed --noconfirm "${pkgs[@]}"
+  fi
+}
+
+install_runtime() {
+  echo "==> Building & installing Quattro runtime to $INSTALL_DIR..."
+  if [[ -d $PROJECT_DIR/src ]] && command -v make >/dev/null 2>&1; then
+    make -C "$PROJECT_DIR/src" >/dev/null
+  fi
+  mkdir -p "$INSTALL_DIR"
+
+  for item in applications bin default install libexec shell src themes icon.png icon.txt logo.svg logo.txt version LICENSE; do
+    if [[ -d $PROJECT_DIR/$item ]]; then
+      mkdir -p "$INSTALL_DIR/$item"
+      cp -a "$PROJECT_DIR/$item/." "$INSTALL_DIR/$item/"
+    elif [[ -e $PROJECT_DIR/$item ]]; then
+      cp -a "$PROJECT_DIR/$item" "$INSTALL_DIR/$item"
+    fi
+  done
+
+  echo "==> Linking quattro-* commands into $BIN_LINK_DIR..."
+  mkdir -p "$BIN_LINK_DIR"
+  for link in "$BIN_LINK_DIR"/quattro-*; do
+    [[ -L $link && ! -e $link ]] && rm -f "$link"
+  done
+  for bin_file in "$PROJECT_DIR"/bin/*; do
+    local name="${bin_file##*/}"
+    ln -snf "$INSTALL_DIR/bin/$name" "$BIN_LINK_DIR/$name"
+  done
+}
+
+install_user_configs() {
+  echo "==> Deploying ~/.config from $PROJECT_DIR/config..."
+  mkdir -p "$HOME/.config"
+
+  local entry name target
+  for entry in "$PROJECT_DIR"/config/* "$PROJECT_DIR"/config/.*; do
+    name="${entry##*/}"
+    [[ $name == "." || $name == ".." ]] && continue
+    [[ -e $entry ]] || continue
+    target="$HOME/.config/$name"
+
+    if [[ -d $entry ]]; then
+      mkdir -p "$target"
+      # Copy sub-items individually so existing user files outside Quattro defaults are backed up
+      while IFS= read -r -d '' src_file; do
+        local rel="${src_file#$entry/}"
+        local dst_file="$target/$rel"
+        mkdir -p "$(dirname "$dst_file")"
+        cp -a "$src_file" "$dst_file"
+      done < <(find "$entry" \( -type f -o -type l \) -print0)
+    else
+      cp -a "$entry" "$target"
+    fi
+  done
+
+  # Resolve __QUATTRO_PATH__ in chrome/chromium flags
+  for flags_file in "$HOME/.config/chrome-flags.conf" "$HOME/.config/chromium-flags.conf"; do
+    if [[ -f $flags_file ]]; then
+      sed -i "s|__QUATTRO_PATH__|$INSTALL_DIR|g" "$flags_file"
+    fi
+  done
+
+  # Seed ~/.bashrc
+  cp -a "$PROJECT_DIR/default/bashrc" "$HOME/.bashrc"
+
+  # Seed ~/.XCompose if missing
+  if [[ ! -f $HOME/.XCompose ]]; then
+    cat >"$HOME/.XCompose" <<EOF
+# Run quattro-restart-xcompose to apply changes
+
+# Include fast emoji access
+include "$INSTALL_DIR/default/xcompose"
+EOF
+  fi
+
+  # Update branding files for fastfetch & screensaver
+  mkdir -p "$HOME/.config/quattro/branding" "$HOME/.config/quattro/themes"
+  cp -a "$PROJECT_DIR/logo.txt" "$HOME/.config/quattro/branding/about.txt"
+  cp -a "$PROJECT_DIR/icon.txt" "$HOME/.config/quattro/branding/screensaver.txt"
+
+  # Seed dwl toggles directory
+  mkdir -p "$HOME/.local/state/quattro/toggles/dwl"
+
+  # Seed UWSM user env drop-in & xdg-terminal-exec list
+  mkdir -p "$HOME/.config/uwsm/env.d" "$HOME/.config/xdg-terminal-exec" "$HOME/.config/environment.d"
+  cp -a "$PROJECT_DIR/default/uwsm/env.d/10-quattro" "$HOME/.config/uwsm/env.d/10-quattro"
+  cp -a "$PROJECT_DIR/default/xdg-terminal-exec/dwl-xdg-terminals.list" "$HOME/.config/xdg-terminal-exec/dwl-xdg-terminals.list"
+  cp -a "$PROJECT_DIR/default/environment.d/10-quattro-fcitx.conf" "$HOME/.config/environment.d/10-quattro-fcitx.conf"
+
+  cat >"$HOME/.config/environment.d/20-quattro-path.conf" <<EOF
+QUATTRO_PATH=$INSTALL_DIR
+PATH=$BIN_LINK_DIR:$INSTALL_DIR/bin:\$PATH
+EOF
+
+  # Install desktop entries, icons, and fonts to ~/.local/share
+  mkdir -p "$HOME/.local/share/applications" "$HOME/.local/share/fonts/quattro" "$HOME/.config/fontconfig/conf.d"
+  cp -a "$PROJECT_DIR"/applications/*.desktop "$HOME/.local/share/applications/"
+  if command -v alacritty >/dev/null 2>&1 && [[ -f $PROJECT_DIR/default/alacritty/Alacritty.desktop ]]; then
+    cp -a "$PROJECT_DIR/default/alacritty/Alacritty.desktop" "$HOME/.local/share/applications/"
+  fi
+  if command -v foot >/dev/null 2>&1 && [[ -f $PROJECT_DIR/default/foot/foot.desktop ]]; then
+    cp -a "$PROJECT_DIR/default/foot/foot.desktop" "$HOME/.local/share/applications/"
+  fi
+  rm -f "$HOME/.cache/xdg-terminal-exec"
+  cp -a "$PROJECT_DIR/default/fonts/quattro/quattro.ttf" "$HOME/.local/share/fonts/quattro/quattro.ttf"
+  cp -a "$PROJECT_DIR/default/fontconfig/conf.avail/50-quattro.conf" "$HOME/.config/fontconfig/conf.d/50-quattro.conf"
+
+  mkdir -p "$HOME/.local/share/icons/hicolor/256x256/apps"
+  cp -a "$PROJECT_DIR/icon.png" "$HOME/.local/share/icons/hicolor/256x256/apps/quattro.png"
+  if [[ -d $PROJECT_DIR/applications/icons ]]; then
+    cp -a "$PROJECT_DIR/applications/icons/." "$HOME/.local/share/icons/hicolor/256x256/apps/"
+  fi
+
+  # Remove orphaned web-app entries whose icon file is missing
+  local app_file exec_line icon_line
+  while IFS= read -r -d '' app_file; do
+    exec_line=$(grep -m1 '^Exec=' "$app_file" 2>/dev/null || true)
+    [[ $exec_line == Exec=*launch-webapp* || $exec_line == Exec=*webapp-handler* ]] || continue
+    icon_line=$(sed -n 's/^Icon=//p' "$app_file" 2>/dev/null | head -n1)
+    if [[ -z $icon_line ]]; then
+      rm -f "$app_file"
+    elif [[ $icon_line == /* && ! -e $icon_line ]]; then
+      rm -f "$app_file"
+    elif [[ $icon_line != /* ]]; then
+      local icon_base="${icon_line%.*}"
+      if ! find -L "$HOME/.local/share/icons" /usr/share/icons /usr/share/pixmaps -type f \( -name "$icon_line" -o -name "$icon_base.png" -o -name "$icon_base.svg" \) -print -quit 2>/dev/null | grep -q .; then
+        rm -f "$app_file"
+      fi
+    fi
+  done < <(find "$HOME/.local/share/applications" -maxdepth 1 -type f -name '*.desktop' -print0 2>/dev/null)
+
+  # User-level XKB option (Shift + CapsLock Compose), fastfetch, and mpv defaults
+  mkdir -p "$HOME/.config/xkb/rules" "$HOME/.config/xkb/symbols"
+  cp -a "$PROJECT_DIR/etc/xkb/rules/evdev" "$HOME/.config/xkb/rules/evdev"
+  cp -a "$PROJECT_DIR/etc/xkb/symbols/quattro" "$HOME/.config/xkb/symbols/quattro"
+
+  if [[ ! -f $HOME/.config/fastfetch/config.jsonc ]]; then
+    mkdir -p "$HOME/.config/fastfetch"
+    cp -a "$PROJECT_DIR/etc/fastfetch/config.jsonc" "$HOME/.config/fastfetch/config.jsonc"
+  fi
+
+  if [[ ! -f $HOME/.config/mpv/mpv.conf ]]; then
+    mkdir -p "$HOME/.config/mpv"
+    cp -a "$PROJECT_DIR/etc/mpv/mpv.conf" "$HOME/.config/mpv/mpv.conf"
+  fi
+
+  # Install user systemd units
+  mkdir -p "$HOME/.config/systemd/user/wireplumber.service.d"
+  for unit in "$PROJECT_DIR"/default/systemd/user/*.service; do
+    cp -a "$unit" "$HOME/.config/systemd/user/"
+  done
+  cp -a "$PROJECT_DIR/default/systemd/user/wireplumber.service.d/"*.conf "$HOME/.config/systemd/user/wireplumber.service.d/"
+
+  # Install default mimeapps if user doesn't have one yet
+  if [[ ! -f $HOME/.config/mimeapps.list ]]; then
+    cp -a "$PROJECT_DIR/default/applications/mimeapps.list" "$HOME/.config/mimeapps.list"
+  elif command -v xdg-mime >/dev/null 2>&1; then
+    xdg-mime default org.gnome.Nautilus.desktop inode/directory || true
+  fi
+
+  # Refresh font cache
+  if command -v fc-cache >/dev/null 2>&1; then
+    fc-cache -f "$HOME/.local/share/fonts" || true
+  fi
+}
+
+generate_initial_theme() {
+  echo "==> Generating initial theme ($THEME)..."
+  export QUATTRO_PATH="$INSTALL_DIR"
+  export PATH="$BIN_LINK_DIR:$INSTALL_DIR/bin:$PATH"
+  export QUATTRO_THEME_HEADLESS=1
+
+  "$INSTALL_DIR/bin/quattro-theme-set" "$THEME"
+  mkdir -p "$HOME/.config/btop/themes"
+  ln -snf "$HOME/.local/state/quattro/current/theme/btop.theme" "$HOME/.config/btop/themes/current.theme"
+
+  if command -v quattro-theme-set-qt >/dev/null 2>&1; then
+    quattro-theme-set-qt || true
+  fi
+}
+
+cleanup_pacman_repos() {
+  local cleaned=0
+
+  # Remove any leftover [quattro] / [omarchy] custom repo block from /etc/pacman.conf without adding any repo
+  if [[ -f /etc/pacman.conf ]] && grep -qE '^[[:space:]]*\[(quattro|omarchy)\][[:space:]]*$|pkgs\.omarchy\.org' /etc/pacman.conf; then
+    echo "==> Removing leftover [quattro] repository from /etc/pacman.conf..."
+    awk '
+      /^[[:space:]]*\[(quattro|omarchy)\][[:space:]]*$/ { skip = 1; next }
+      skip && /^[[:space:]]*\[/ { skip = 0 }
+      skip { next }
+      /pkgs\.omarchy\.org/ { next }
+      { print }
+    ' /etc/pacman.conf | sudo tee /etc/pacman.conf.tmp >/dev/null
+    sudo mv /etc/pacman.conf.tmp /etc/pacman.conf
+    sudo chmod 0644 /etc/pacman.conf
+    sudo rm -f /var/lib/pacman/sync/quattro.db* /var/lib/pacman/sync/omarchy.db*
+    cleaned=1
+  fi
+
+  # If a previous Channel action overwrote /etc/pacman.d/mirrorlist with an omarchy.org mirror, restore stock Arch mirror
+  if [[ -f /etc/pacman.d/mirrorlist ]] && grep -qE 'omarchy\.org' /etc/pacman.d/mirrorlist; then
+    echo "==> Restoring standard Arch Linux mirrorlist..."
+    if [[ -f /etc/pacman.d/mirrorlist.bak ]] && ! grep -qE 'omarchy\.org' /etc/pacman.d/mirrorlist.bak; then
+      sudo cp -f /etc/pacman.d/mirrorlist.bak /etc/pacman.d/mirrorlist
+    else
+      printf 'Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch\n' | sudo tee /etc/pacman.d/mirrorlist >/dev/null
+    fi
+    sudo chmod 0644 /etc/pacman.d/mirrorlist
+    cleaned=1
+  fi
+
+  if (( cleaned )); then
+    sudo pacman -Syy --noconfirm
+  fi
+}
+
+install_system_configs() {
+  echo "==> Installing system-wide Arch integration (requires sudo)..."
+  sudo mkdir -p \
+    /usr/local/bin \
+    /usr/local/share/wayland-sessions \
+    /etc/sddm.conf.d \
+    /usr/share/sddm/themes/quattro \
+    /etc/profile.d \
+    /usr/share/uwsm/env.d \
+    /etc/fastfetch \
+    /etc/mpv \
+    /etc/xdg/kitty \
+    /etc/xkb/rules \
+    /etc/xkb/symbols \
+    /etc/xdg/xdg-desktop-portal \
+    /etc/fonts/conf.d
+
+  sudo install -Dm755 "$INSTALL_DIR/bin/quattro-dwl-session" /usr/local/bin/quattro-dwl-session
+  sudo cp -a "$PROJECT_DIR/default/wayland-sessions/quattro.desktop" /usr/local/share/wayland-sessions/quattro.desktop
+  sudo cp -a "$PROJECT_DIR/etc/sddm.conf.d/10-wayland.conf" /etc/sddm.conf.d/10-wayland.conf
+  sudo cp -a "$PROJECT_DIR/etc/sddm.conf.d/10-theme.conf" /etc/sddm.conf.d/10-theme.conf
+  cat <<'EOF' | sudo tee /etc/sddm.conf.d/99-quattro-login.conf >/dev/null
+[Users]
+RememberLastUser=true
+RememberLastSession=true
+EOF
+  sudo cp -a "$PROJECT_DIR/default/sddm/quattro/." /usr/share/sddm/themes/quattro/
+  if ! sudo grep -qE '^User=.+' /var/lib/sddm/state.conf 2>/dev/null; then
+    sudo install -d -m 0755 -o sddm -g sddm /var/lib/sddm 2>/dev/null || sudo install -d -m 0755 /var/lib/sddm
+    cat <<EOF | sudo tee /var/lib/sddm/state.conf >/dev/null
+[Last]
+Session=quattro.desktop
+User=$USER
+EOF
+    sudo chown sddm:sddm /var/lib/sddm /var/lib/sddm/state.conf 2>/dev/null || true
+  fi
+  sudo cp -a "$PROJECT_DIR/etc/profile.d/quattro.sh" /etc/profile.d/quattro.sh
+  sudo cp -a "$PROJECT_DIR/default/uwsm/env.d/10-quattro" /usr/share/uwsm/env.d/10-quattro
+  sudo cp -a "$PROJECT_DIR/etc/fastfetch/config.jsonc" /etc/fastfetch/config.jsonc
+  sudo cp -a "$PROJECT_DIR/etc/mpv/mpv.conf" /etc/mpv/mpv.conf
+  sudo cp -a "$PROJECT_DIR/etc/xdg/kitty/kitty.conf" /etc/xdg/kitty/kitty.conf
+  sudo cp -a "$PROJECT_DIR/etc/xkb/rules/evdev" /etc/xkb/rules/evdev
+  sudo cp -a "$PROJECT_DIR/etc/xkb/symbols/quattro" /etc/xkb/symbols/quattro
+  sudo cp -a "$PROJECT_DIR/config/xdg-desktop-portal/wlroots-portals.conf" /etc/xdg/xdg-desktop-portal/wlroots-portals.conf
+  sudo cp -a "$PROJECT_DIR/config/xdg-desktop-portal/dwl-portals.conf" /etc/xdg/xdg-desktop-portal/dwl-portals.conf
+  sudo cp -a "$PROJECT_DIR/default/fontconfig/conf.avail/50-quattro.conf" /etc/fonts/conf.d/50-quattro.conf
+
+  # Prevent SDDM PAM logins from creating an encrypted keyring that prompts on login
+  if [[ -f /etc/pam.d/sddm ]]; then
+    sudo sed -i '/-auth.*pam_gnome_keyring\.so/d' /etc/pam.d/sddm
+    sudo sed -i '/-password.*pam_gnome_keyring\.so/d' /etc/pam.d/sddm
+  fi
+  if command -v faillock >/dev/null 2>&1; then
+    sudo faillock --user "$USER" --reset 2>/dev/null || true
+  fi
+
+  printf 'export QUATTRO_PATH="%s"\n' "$INSTALL_DIR" | sudo tee /etc/quattro.conf >/dev/null
+
+  # Install packaged root-owned DNS helper and passwordless sudoers rule for one-click DNS switching
+  sudo install -Dm755 -o root -g root "$PROJECT_DIR/bin/quattro-dns" /usr/bin/quattro-dns
+  if ! command -v visudo >/dev/null 2>&1 || visudo -cf "$PROJECT_DIR/etc/sudoers.d/quattro-dns" >/dev/null 2>&1; then
+    sudo install -Dm440 -o root -g root "$PROJECT_DIR/etc/sudoers.d/quattro-dns" /etc/sudoers.d/quattro-dns
+  fi
+
+  # Ensure Quickshell lock screen PAM config (/etc/pam.d/quattro-lock-password) is installed
+  if [[ -x $INSTALL_DIR/bin/quattro-apply-lock ]]; then
+    sudo QUATTRO_PATH="$INSTALL_DIR" QUATTRO_INSTALL_USER="$USER" "$INSTALL_DIR/bin/quattro-apply-lock"
+  fi
+
+  echo "==> Enabling SDDM display manager..."
+  sudo systemctl enable sddm.service
+  echo "Rebooting the System..."
+  sudo reboot
+}
+
+if ! $SANDBOX; then
+  cleanup_pacman_repos
+  setup_cachyos_repos
+  install_packages
+fi
+
+install_runtime
+install_user_configs
+generate_initial_theme
+
+if ! $SANDBOX; then
+  install_system_configs
+fi
+
+cat <<EOF
+
+Done! Quattro (dwl) installed to: $INSTALL_DIR
+
+Next steps:
+  1. Open a new bash login shell (or run: source ~/.bashrc)
+  2. Switch themes anytime with:
+     quattro-theme-set "Tokyo Night"   # or catppuccin, gruvbox, kanagawa, nord, etc.
+  3. Log in via SDDM (Quattro (dwl)) or start from TTY:
+     quattro-dwl-session
+EOF
+
+if ! $SANDBOX && [[ -d /run/systemd/system ]] && [[ -z ${DISPLAY:-}${WAYLAND_DISPLAY:-} ]] && ! systemctl is-active --quiet sddm.service; then
+  echo "==> Enabling SDDM..."
+  sudo systemctl enable sddm.service
+fi

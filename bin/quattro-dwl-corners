@@ -1,0 +1,38 @@
+#!/bin/bash
+
+# quattro:summary=Get or set Quattro shell corner style (theme, sharp, rounded)
+# quattro:group=dwl
+# quattro:name=corners
+# quattro:args=[theme|sharp|rounded]
+
+set -euo pipefail
+
+DIR="$HOME/.local/state/quattro/toggles/dwl"
+
+case ${1:-} in
+  "")
+    if [[ -e "$DIR/corners-sharp" ]]; then
+      echo sharp
+    elif [[ -e "$DIR/corners-rounded" ]]; then
+      echo rounded
+    else
+      echo theme
+    fi
+    ;;
+  theme)
+    quattro-dwl-toggle corners-sharp off
+    quattro-dwl-toggle corners-rounded off
+    ;;
+  sharp)
+    quattro-dwl-toggle corners-rounded off
+    quattro-dwl-toggle corners-sharp on
+    ;;
+  rounded)
+    quattro-dwl-toggle corners-sharp off
+    quattro-dwl-toggle corners-rounded on
+    ;;
+  *)
+    echo "Usage: quattro-dwl-corners [theme|sharp|rounded]" >&2
+    exit 1
+    ;;
+esac

@@ -1,0 +1,40 @@
+#!/bin/bash
+
+# quattro:summary=Pick a pixel color on screen using slurp and grim and copy hex to clipboard
+# quattro:group=capture
+# quattro:name=color picker
+
+set -euo pipefail
+
+point=$(slurp -p 2>/dev/null) || exit 0
+[[ -n $point ]] || exit 0
+
+hex=$(grim -g "$point" -t ppm - 2>/dev/null | python3 -c '
+import sys
+data = sys.stdin.buffer.read()
+lines = 0
+i = 0
+# Skip P6 header (3 whitespace-separated tokens: magic, width height, maxval)
+tokens = []
+tok = bytearray()
+while len(tokens) < 4 and i < len(data):
+    b = data[i]
+    i += 1
+    if b in b" \t\r\n":
+        if tok:
+            tokens.append(bytes(tok))
+            tok.clear()
+    elif b == ord("#") and not tok:
+        while i < len(data) and data[i] != 10:
+            i += 1
+    else:
+        tok.append(b)
+if len(data) - i >= 3:
+    r, g, b = data[i], data[i+1], data[i+2]
+    print(f"#{r:02x}{g:02x}{b:02x}")
+' 2>/dev/null)
+
+if [[ -n $hex ]]; then
+  printf '%s' "$hex" | wl-copy
+  quattro-notification-send "Color copied" "$hex"
+fi

@@ -1,0 +1,41 @@
+#!/bin/bash
+
+# quattro:summary=Toggle shell animations, which can be disabled for software rendering
+# quattro:args=[toggle|on|off]
+# quattro:examples=quattro toggle animations | quattro toggle animations off | quattro toggle animations on
+
+set -euo pipefail
+
+case ${1:-toggle} in
+toggle)
+  if quattro-dwl-animations-off; then
+    animations=on
+  else
+    animations=off
+  fi
+  ;;
+on | off) animations=$1 ;;
+*)
+  echo "Usage: quattro-toggle-animations [toggle|on|off]" >&2
+  exit 1
+  ;;
+esac
+
+without_gpu="$HOME/.local/state/quattro/toggles/animations-without-gpu"
+
+if [[ $animations == "on" ]]; then
+  if [[ -e "${XDG_RUNTIME_DIR:-/run/user/$UID}/quattro-software-rendering" ]]; then
+    mkdir -p "${without_gpu%/*}"
+    touch "$without_gpu"
+  fi
+  quattro-dwl-toggle no-animations off
+else
+  rm -f "$without_gpu"
+  quattro-dwl-toggle no-animations on
+fi
+
+if quattro-dwl-animations-off; then
+  quattro-notification-send -g 󰗘 "$(quattro-i18n animations.disabled)"
+else
+  quattro-notification-send -g 󰗘 "$(quattro-i18n animations.enabled)"
+fi

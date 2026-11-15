@@ -1,0 +1,403 @@
+#!/usr/bin/env python3
+
+# quattro:summary=Update monitor entries in ~/.config/dwl/config.toml (or config.h)
+# quattro:group=dwl
+# quattro:name=monitor persist
+# quattro:hidden=true
+
+import argparse
+import json
+import re
+import shutil
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
+
+TRANSFORM_MAP = {
+    "normal": "WL_OUTPUT_TRANSFORM_NORMAL",
+    "0": "WL_OUTPUT_TRANSFORM_NORMAL",
+    "90": "WL_OUTPUT_TRANSFORM_90",
+    "180": "WL_OUTPUT_TRANSFORM_180",
+    "270": "WL_OUTPUT_TRANSFORM_270",
+    "flipped": "WL_OUTPUT_TRANSFORM_FLIPPED",
+    "flipped-90": "WL_OUTPUT_TRANSFORM_FLIPPED_90",
+    "flipped-180": "WL_OUTPUT_TRANSFORM_FLIPPED_180",
+    "flipped-270": "WL_OUTPUT_TRANSFORM_FLIPPED_270",
+}
+
+TOML_TRANSFORM_MAP = {
+    "WL_OUTPUT_TRANSFORM_NORMAL": "normal",
+    "WL_OUTPUT_TRANSFORM_90": "90",
+    "WL_OUTPUT_TRANSFORM_180": "180",
+    "WL_OUTPUT_TRANSFORM_270": "270",
+    "WL_OUTPUT_TRANSFORM_FLIPPED": "flipped",
+    "WL_OUTPUT_TRANSFORM_FLIPPED_90": "flipped-90",
+    "WL_OUTPUT_TRANSFORM_FLIPPED_180": "flipped-180",
+    "WL_OUTPUT_TRANSFORM_FLIPPED_270": "flipped-270",
+    "normal": "normal",
+    "0": "normal",
+    "90": "90",
+    "180": "180",
+    "270": "270",
+    "flipped": "flipped",
+    "flipped-90": "flipped-90",
+    "flipped-180": "flipped-180",
+    "flipped-270": "flipped-270",
+}
+
+ENTRY_RE = re.compile(
+    r'^\s*\{\s*("(?P<name>[^"]+)"|NULL)\s*,\s*'
+    r'(?P<mfact>[^,]+),\s*(?P<nmaster>[^,]+),\s*'
+    r'(?P<resx>[^,]+),\s*(?P<resy>[^,]+),\s*(?P<refresh>[^,]+),\s*'
+    r'(?P<scale>[^,]+),\s*(?P<layout>[^,]+),\s*(?P<rr>[^,]+),\s*'
+    r'(?P<x>[^,]+),\s*(?P<y>[^}]+)\}\s*,?\s*$'
+)
+
+
+def current_monitors() -> dict:
+    ipc = shutil.which("quattro-dwl-ipc")
+    if not ipc:
+        return {}
+    try:
+        out = subprocess.check_output([ipc, "--monitors"], stderr=subprocess.DEVNULL, text=True, timeout=2)
+        items = json.loads(out)
+    except Exception:
+        return {}
+    result = {}
+    for item in items if isinstance(items, list) else []:
+        name = item.get("name")
+        if not name:
+            continue
+        modes = item.get("modes") or []
+        cur = next((m for m in modes if m.get("current")), modes[0] if modes else {})
+        result[name] = {
+            "resx": int(cur.get("width", 0) or 0),
+            "resy": int(cur.get("height", 0) or 0),
+            "refresh": float(cur.get("refresh", 0.0) or 0.0),
+            "scale": float(item.get("scale", 1.0) or 1.0),
+            "rr": TRANSFORM_MAP.get(str(item.get("transform", "normal")), "WL_OUTPUT_TRANSFORM_NORMAL"),
+            "x": int((item.get("position") or {}).get("x", -1)),
+            "y": int((item.get("position") or {}).get("y", -1)),
+        }
+    return result
+
+
+def parse_mode(mode: str) -> tuple[int, int, float]:
+    mode = mode.rstrip("Hz")
+    if "@" in mode:
+        res_part, hz_part = mode.split("@", 1)
+        hz = float(hz_part)
+    else:
+        res_part, hz = mode, 0.0
+    w_s, h_s = res_part.lower().split("x", 1)
+    return int(w_s), int(h_s), hz
+
+
+def update_config_h(config_path: Path, updates: dict[str, dict]) -> bool:
+    if not config_path.is_file() or not updates:
+        return False
+    text = config_path.read_text()
+    block_re = re.compile(
+        r'(static\s+const\s+MonitorRule\s+monrules\[\]\s*=\s*\{\n)(.*?)(\n\};)',
+        re.DOTALL,
+    )
+    match = block_re.search(text)
+    if not match:
+        return False
+
+    lines = match.group(2).splitlines()
+    parsed: list[tuple[str | None, dict]] = []
+    header_comments: list[str] = []
+    fallback_entry: dict | None = None
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("/*") or stripped.startswith("//") or stripped.startswith("*"):
+            if not parsed:
+                header_comments.append(line)
+            continue
+        em = ENTRY_RE.match(line)
+        if not em:
+            continue
+        entry = {
+            "mfact": em.group("mfact").strip(),
+            "nmaster": em.group("nmaster").strip(),
+            "resx": int(em.group("resx").strip()),
+            "resy": int(em.group("resy").strip()),
+            "refresh": float(em.group("refresh").strip().rstrip("f")),
+            "scale": float(em.group("scale").strip().rstrip("f")),
+            "layout": em.group("layout").strip(),
+            "rr": em.group("rr").strip(),
+            "x": int(em.group("x").strip()),
+            "y": int(em.group("y").strip()),
+        }
+        name = em.group("name")
+        if name is None:
+            fallback_entry = entry
+        else:
+            parsed.append((name, entry))
+
+    live = current_monitors()
+    by_name = {name: entry for name, entry in parsed}
+    order = [name for name, _ in parsed]
+    for name, patch in updates.items():
+        if name not in by_name:
+            base = dict(live.get(name, {}))
+            entry = {
+                "mfact": "0.55f",
+                "nmaster": "1",
+                "resx": base.get("resx", 0),
+                "resy": base.get("resy", 0),
+                "refresh": base.get("refresh", 0.0),
+                "scale": base.get("scale", 1.0),
+                "layout": "&layouts[0]",
+                "rr": base.get("rr", "WL_OUTPUT_TRANSFORM_NORMAL"),
+                "x": base.get("x", -1),
+                "y": base.get("y", -1),
+            }
+            by_name[name] = entry
+            order.append(name)
+        by_name[name].update(patch)
+
+    rendered = list(header_comments)
+    for name in order:
+        e = by_name[name]
+        rendered.append(
+            f'\t{{ "{name}", {e["mfact"]}, {e["nmaster"]}, '
+            f'{e["resx"]}, {e["resy"]}, {e["refresh"]:.2f}f, '
+            f'{e["scale"]:.2f}f, {e["layout"]}, {e["rr"]}, '
+            f'{e["x"]}, {e["y"]} }},'
+        )
+    fb = fallback_entry or {
+        "mfact": "0.55f",
+        "nmaster": "1",
+        "resx": 0,
+        "resy": 0,
+        "refresh": 0.0,
+        "scale": 1.0,
+        "layout": "&layouts[0]",
+        "rr": "WL_OUTPUT_TRANSFORM_NORMAL",
+        "x": -1,
+        "y": -1,
+    }
+    rendered.append(
+        f'\t{{ NULL, {fb["mfact"]}, {fb["nmaster"]}, '
+        f'{fb["resx"]}, {fb["resy"]}, {fb["refresh"]:.2f}f, '
+        f'{fb["scale"]:.2f}f, {fb["layout"]}, {fb["rr"]}, '
+        f'{fb["x"]}, {fb["y"]} }},'
+    )
+
+    new_block = match.group(1) + "\n".join(rendered) + match.group(3)
+    new_text = text[:match.start()] + new_block + text[match.end():]
+    config_path.write_text(new_text)
+    return True
+
+
+def _toml_str(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def _to_toml_transform(value: str) -> str:
+    return TOML_TRANSFORM_MAP.get(str(value).strip(), "normal")
+
+
+def _format_toml_monitor(name: str, entry: dict) -> list[str]:
+    return [
+        "[[monitors]]",
+        f'name = {_toml_str(name)}',
+        f'mfact = {round(float(entry.get("mfact", 0.55)), 4)}',
+        f'nmaster = {int(entry.get("nmaster", 1))}',
+        f'width = {int(entry.get("resx", 0))}',
+        f'height = {int(entry.get("resy", 0))}',
+        f'refresh = {round(float(entry.get("refresh", 0.0)), 2)}',
+        f'scale = {round(float(entry.get("scale", 1.0)), 2)}',
+        f'layout = {_toml_str(str(entry.get("layout", "dwindle")))}',
+        f'transform = {_toml_str(_to_toml_transform(entry.get("rr", "normal")))}',
+        f'x = {int(entry.get("x", -1))}',
+        f'y = {int(entry.get("y", -1))}',
+    ]
+
+
+def _default_config_path() -> Path:
+    dwl_dir = Path.home() / ".config/dwl"
+    toml_cfg = dwl_dir / "config.toml"
+    h_cfg = dwl_dir / "config.h"
+    if toml_cfg.is_file() or not h_cfg.is_file():
+        return toml_cfg
+    return h_cfg
+
+
+def update_config_toml(config_path: Path, updates: dict[str, dict]) -> bool:
+    if not config_path.is_file() or not updates:
+        return False
+    text = config_path.read_text()
+    data = tomllib.loads(text)
+
+    parsed: dict[str, dict] = {}
+    order: list[str] = []
+    fallback_entry: dict | None = None
+
+    for item in data.get("monitors") or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name", "*"))
+        entry = {
+            "mfact": float(item.get("mfact", 0.55)),
+            "nmaster": int(item.get("nmaster", 1)),
+            "resx": int(item.get("width", 0)),
+            "resy": int(item.get("height", 0)),
+            "refresh": float(item.get("refresh", 0.0)),
+            "scale": float(item.get("scale", 1.0)),
+            "layout": str(item.get("layout", "dwindle")),
+            "rr": _to_toml_transform(str(item.get("transform", "normal"))),
+            "x": int(item.get("x", -1)),
+            "y": int(item.get("y", -1)),
+        }
+        if name == "*":
+            fallback_entry = entry
+        else:
+            if name not in parsed:
+                order.append(name)
+            parsed[name] = entry
+
+    live = current_monitors()
+    for name, patch in updates.items():
+        if name == "*":
+            target = fallback_entry or {
+                "mfact": 0.55,
+                "nmaster": 1,
+                "resx": 0,
+                "resy": 0,
+                "refresh": 0.0,
+                "scale": 1.0,
+                "layout": "dwindle",
+                "rr": "normal",
+                "x": -1,
+                "y": -1,
+            }
+            fallback_entry = target
+        else:
+            if name not in parsed:
+                base = dict(live.get(name, {}))
+                parsed[name] = {
+                    "mfact": 0.55,
+                    "nmaster": 1,
+                    "resx": base.get("resx", 0),
+                    "resy": base.get("resy", 0),
+                    "refresh": base.get("refresh", 0.0),
+                    "scale": base.get("scale", 1.0),
+                    "layout": "dwindle",
+                    "rr": _to_toml_transform(str(base.get("rr", "normal"))),
+                    "x": base.get("x", -1),
+                    "y": base.get("y", -1),
+                }
+                order.append(name)
+            target = parsed[name]
+        for k, v in patch.items():
+            target[k] = _to_toml_transform(v) if k == "rr" else v
+
+    blocks: list[str] = []
+    for name in order:
+        blocks.append("\n".join(_format_toml_monitor(name, parsed[name])))
+    fb = fallback_entry or {
+        "mfact": 0.55,
+        "nmaster": 1,
+        "resx": 0,
+        "resy": 0,
+        "refresh": 0.0,
+        "scale": 1.0,
+        "layout": "dwindle",
+        "rr": "normal",
+        "x": -1,
+        "y": -1,
+    }
+    blocks.append("\n".join(_format_toml_monitor("*", fb)))
+    rendered_lines = ("\n\n".join(blocks)).splitlines()
+
+    lines = text.splitlines()
+    start_idx: int | None = None
+    last_kv_idx: int | None = None
+    in_monitors = False
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if re.match(r"^\[\[monitors\]\]\s*(#.*)?$", stripped):
+            if start_idx is None:
+                start_idx = idx
+            in_monitors = True
+            last_kv_idx = idx
+            continue
+        if in_monitors:
+            if stripped.startswith("["):
+                in_monitors = False
+            elif stripped and not stripped.startswith("#"):
+                last_kv_idx = idx
+
+    if start_idx is not None and last_kv_idx is not None:
+        new_lines = lines[:start_idx] + rendered_lines + lines[last_kv_idx + 1:]
+    else:
+        insert_at = next(
+            (i for i, l in enumerate(lines) if re.match(r"^\[\[rules\]\]", l.strip())),
+            len(lines),
+        )
+        prefix = lines[:insert_at]
+        suffix = lines[insert_at:]
+        if prefix and prefix[-1].strip():
+            prefix.append("")
+        if suffix and suffix[0].strip():
+            rendered_lines.append("")
+        new_lines = prefix + rendered_lines + suffix
+
+    config_path.write_text("\n".join(new_lines) + "\n")
+    return True
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Update monitor entries in ~/.config/dwl/config.toml (or config.h)")
+    parser.add_argument("--monitor", action="append", default=[], help="Target monitor name")
+    parser.add_argument("--mode", help="WxH[@Hz]")
+    parser.add_argument("--scale", type=float)
+    parser.add_argument("--pos", help="XxY or X,Y")
+    parser.add_argument("--transform", help="normal|90|180|270|flipped...")
+    parser.add_argument("--config", default=str(_default_config_path()))
+    args = parser.parse_args()
+
+    updates: dict[str, dict] = {}
+    if args.monitor:
+        patch: dict = {}
+        if args.mode:
+            w, h, hz = parse_mode(args.mode)
+            patch["resx"] = w
+            patch["resy"] = h
+            if hz > 0:
+                patch["refresh"] = hz
+        if args.scale is not None:
+            patch["scale"] = args.scale
+        if args.pos:
+            sep = "," if "," in args.pos else "x"
+            px, py = args.pos.split(sep, 1)
+            patch["x"] = int(px)
+            patch["y"] = int(py)
+        if args.transform:
+            patch["rr"] = TRANSFORM_MAP.get(args.transform, "WL_OUTPUT_TRANSFORM_NORMAL")
+        for m in args.monitor:
+            updates[m] = dict(patch)
+    else:
+        updates = current_monitors()
+
+    cfg_path = Path(args.config)
+    if cfg_path.suffix == ".toml":
+        changed = update_config_toml(cfg_path, updates)
+        active_toml = Path.home() / ".config/dwl/config.toml"
+        if changed and cfg_path.resolve() == active_toml.resolve():
+            subprocess.run(["pkill", "-USR1", "-x", "dwl"], stderr=subprocess.DEVNULL, check=False)
+    else:
+        update_config_h(cfg_path, updates)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

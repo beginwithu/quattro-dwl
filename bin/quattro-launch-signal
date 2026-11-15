@@ -1,0 +1,11 @@
+#!/bin/bash
+
+# quattro:summary=Launch Signal or start its installer when missing.
+
+set -e
+
+if [[ -x /usr/bin/signal-desktop ]]; then
+  exec setsid uwsm-app -- /usr/bin/signal-desktop
+else
+  exec quattro-launch-floating-terminal-with-presentation quattro-install-service-signal
+fi

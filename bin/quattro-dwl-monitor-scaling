@@ -1,0 +1,42 @@
+#!/bin/bash
+
+# quattro:summary=Get or configure monitor scaling factor for dwl
+# quattro:group=dwl
+# quattro:name=monitor scaling
+# quattro:args=[--monitor <name>] [<scale|cycle>]
+
+set -euo pipefail
+
+MONITOR=""
+SCALE=""
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --monitor|-m) MONITOR=${2:-}; shift 2 ;;
+    -h|--help)
+      echo "Usage: quattro-dwl-monitor-scaling [--monitor <name>] [<scale|cycle>]"
+      exit 0
+      ;;
+    *) SCALE=$1; shift ;;
+  esac
+done
+
+[[ -z $MONITOR ]] && MONITOR=$(quattro-dwl-monitor-focused)
+[[ -z $MONITOR ]] && exit 1
+
+if [[ -z $SCALE ]]; then
+  quattro-dwl-ipc --monitors 2>/dev/null | jq -r --arg m "$MONITOR" '.[] | select(.name == $m) | .scale // 1'
+  exit 0
+fi
+
+if [[ $SCALE == "cycle" ]]; then
+  current=$(quattro-dwl-ipc --monitors 2>/dev/null | jq -r --arg m "$MONITOR" '.[] | select(.name == $m) | .scale // 1')
+  case $current in
+    1|1.0*) SCALE="1.25" ;;
+    1.25*)  SCALE="1.5" ;;
+    1.5*)   SCALE="2" ;;
+    *)      SCALE="1" ;;
+  esac
+fi
+
+quattro-dwl-monitor-persist --monitor "$MONITOR" --scale "$SCALE"

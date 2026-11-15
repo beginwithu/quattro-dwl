@@ -1,0 +1,17 @@
+#!/bin/bash
+
+# quattro:summary=Print the focused dwl output name
+# quattro:group=dwl
+# quattro:name=monitor focused
+
+set -euo pipefail
+
+if command -v quattro-dwl-ipc >/dev/null 2>&1; then
+  focused=$(quattro-dwl-ipc --once 2>/dev/null | jq -r '.focusedOutput // empty' 2>/dev/null || true)
+  if [[ -n $focused ]]; then
+    printf '%s\n' "$focused"
+    exit 0
+  fi
+fi
+
+quattro-dwl-ipc --monitors 2>/dev/null | jq -r '[.[] | select(.enabled != false)][0].name // empty'

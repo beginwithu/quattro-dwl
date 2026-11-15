@@ -1,0 +1,26 @@
+#!/bin/bash
+
+# quattro:summary=Decode a QR code from a screenshot region
+# quattro:group=capture
+# quattro:examples=quattro capture qr
+
+SELECTION=$(slurp 2>/dev/null)
+
+[[ -z $SELECTION ]] && exit 0
+
+# Decode QR codes only. Leaving the other symbologies enabled lets dense screen
+# content false-positive as an EAN or Code 39 barcode and take over the clipboard.
+RESULT=$(grim -g "$SELECTION" - | zbarimg -q --raw -Sdisable -Sqrcode.enable - 2>/dev/null)
+
+if [[ -z $RESULT ]]; then
+  quattro-notification-send -g 󰐲 -u critical "$(quattro-i18n capture.qrNone)" "$(quattro-i18n capture.qrHelp)"
+  exit 1
+fi
+
+# QR codes routinely carry secrets, like the otpauth:// URIs behind 2FA setup
+# codes, so the decoded value goes to the clipboard and nowhere else. Printing it
+# or putting it in the notification would leak it to the session journal and to
+# the notification history, and an unmarked copy would be retained by clipboard
+# history. Pasting still works; only the recorded copy is given up.
+printf '%s' "$RESULT" | wl-copy --sensitive
+quattro-notification-send -g 󰐲 "$(quattro-i18n capture.qrCopied)"

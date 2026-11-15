@@ -1,0 +1,26 @@
+#!/bin/bash
+
+# quattro:summary=Disable internal laptop display on lid close when an external output is active
+# quattro:group=dwl
+# quattro:name=monitor clamshell
+# quattro:hidden=true
+
+set -euo pipefail
+
+INTERNAL=$(quattro-dwl-ipc --monitors 2>/dev/null | jq -r '[.[] | select(.name | test("^(eDP|LVDS|DSI)-"))][0].name // empty')
+[[ -n $INTERNAL ]] || exit 0
+
+EXTERNAL_COUNT=$(quattro-dwl-ipc --monitors 2>/dev/null | jq '[.[] | select(.enabled != false and (.name | test("^(eDP|LVDS|DSI)-") | not))] | length')
+
+case ${1:-} in
+  close)
+    if (( EXTERNAL_COUNT > 0 )); then
+      wlopm --off "$INTERNAL" >/dev/null 2>&1 || true
+    fi
+    ;;
+  open)
+    if ! quattro-dwl-toggle-enabled internal-monitor-disable; then
+      wlopm --on "$INTERNAL" >/dev/null 2>&1 || true
+    fi
+    ;;
+esac

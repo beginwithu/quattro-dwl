@@ -1,0 +1,56 @@
+#!/bin/bash
+
+# quattro:summary=Show idle, screensaver, and lock diagnostics
+# quattro:group=debug
+# quattro:args=[log-lines]
+# quattro:examples=quattro debug idle | quattro-debug-idle 400
+
+lines=${1:-200}
+if [[ ! $lines =~ ^[0-9]+$ ]]; then
+  lines=200
+fi
+
+section() {
+  printf '\n== %s ==\n' "$1"
+}
+
+section "Time"
+date -Is
+
+section "Idle IPC status"
+quattro-shell idle status 2>&1 | jq . 2>/dev/null || quattro-shell idle status 2>&1 || true
+
+section "Quickshell instances"
+quickshell list -p "$QUATTRO_PATH/shell" --any-display 2>&1 || true
+
+section "Recent idle logs"
+quickshell --no-color log -p "$QUATTRO_PATH/shell" --any-display --tail "$lines" --log-times -r 'quickshell.wayland.idle_notify=true' 2>&1 \
+  | grep -Ei 'quattro idle|idle_notify|screensaver|lock|error|warn|failed' || true
+
+section "Persisted shell log"
+journalctl -t quattro-shell -n "$lines" --no-pager --quiet 2>/dev/null || true
+
+section "Relevant processes"
+ps -eo pid=,args= \
+  | grep -E 'quickshell -n -p|quattro-system-sleep-monitor|systemd-inhibit.*Lock screen before suspend|quattro-screensaver' \
+  | grep -v grep || true
+
+section "Sleep lock service"
+systemctl --user status quattro-sleep-lock.service --no-pager 2>/dev/null || true
+
+section "dwl active window state"
+quattro-dwl-ipc active-window 2>/dev/null || true
+
+section "Screensaver detector"
+if pgrep -f 'org\.quattro\.screensaver' >/dev/null; then
+  echo "running-layer"
+elif pgrep -f '[/]usr/lib/quattro-screensaver/quattro-screensaver' >/dev/null; then
+  echo "running-process"
+elif quattro-toggle-enabled screensaver-off; then
+  echo "disabled"
+else
+  echo "stopped"
+fi
+
+section "Lock detector"
+quattro-shell lock status 2>&1 | jq . 2>/dev/null || quattro-shell lock status 2>&1 || true

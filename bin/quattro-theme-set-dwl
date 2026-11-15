@@ -1,0 +1,61 @@
+#!/bin/bash
+
+# quattro:summary=Apply current Quattro theme border and root colors to dwl config.toml and reload dwl
+# quattro:hidden=true
+
+set -euo pipefail
+
+colors_toml="${XDG_STATE_HOME:-$HOME/.local/state}/quattro/current/theme/colors.toml"
+config_toml="${XDG_CONFIG_HOME:-$HOME/.config}/dwl/config.toml"
+
+[[ -f $colors_toml && -f $config_toml ]] || exit 0
+
+normalize_rgba() {
+  local hex="${1#\#}"
+  if (( ${#hex} == 6 )); then
+    printf '#%sff\n' "${hex,,}"
+  elif (( ${#hex} == 8 )); then
+    printf '#%s\n' "${hex,,}"
+  else
+    return 1
+  fi
+}
+
+bg_hex=$(quattro-theme-color --file "$colors_toml" background 2>/dev/null) || exit 0
+muted_hex=$(quattro-theme-color --file "$colors_toml" muted 2>/dev/null) || exit 0
+accent_hex=$(quattro-theme-color --file "$colors_toml" accent 2>/dev/null) || exit 0
+red_hex=$(quattro-theme-color --file "$colors_toml" red 2>/dev/null) || exit 0
+
+root_rgba=$(normalize_rgba "$bg_hex") || exit 0
+border_rgba=$(normalize_rgba "$muted_hex") || exit 0
+focus_rgba=$(normalize_rgba "$accent_hex") || exit 0
+urgent_rgba=$(normalize_rgba "$red_hex") || exit 0
+
+python3 - "$config_toml" "$root_rgba" "$border_rgba" "$focus_rgba" "$urgent_rgba" <<'PYEOF'
+import re
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+updates = {
+    "rootcolor": sys.argv[2],
+    "bordercolor": sys.argv[3],
+    "focuscolor": sys.argv[4],
+    "urgentcolor": sys.argv[5],
+}
+
+text = path.read_text(encoding="utf-8")
+for key, val in updates.items():
+    text = re.sub(
+        rf'^({key}\s*=\s*)"[^"]*"',
+        rf'\1"{val}"',
+        text,
+        count=1,
+        flags=re.MULTILINE,
+    )
+path.write_text(text, encoding="utf-8")
+PYEOF
+
+if [[ ${QUATTRO_THEME_HEADLESS:-} != "1" ]] && command -v pkill >/dev/null 2>&1; then
+  pkill -USR1 -x dwl >/dev/null 2>&1 || true
+fi

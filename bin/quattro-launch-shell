@@ -1,0 +1,173 @@
+#!/bin/bash
+
+# quattro:summary=Launch the Quattro shell with its log kept in the journal
+# quattro:hidden=true
+
+# Prevent duplicate supervisor instances while giving quattro-restart-shell time to hand off.
+exec {launch_lock_fd}>"${XDG_RUNTIME_DIR:-/tmp}/quattro-launch-shell.lock"
+flock -w 5 "$launch_lock_fd" || exit 0
+
+sync_session_environment() {
+  local -a vars=(
+    WAYLAND_DISPLAY
+    DISPLAY
+    XAUTHORITY
+    XDG_CURRENT_DESKTOP
+    XDG_SESSION_TYPE
+    XDG_SESSION_DESKTOP
+    XDG_MENU_PREFIX
+    QUATTRO_PATH
+    PATH
+    QT_QPA_PLATFORM
+    QT_QPA_PLATFORMTHEME
+    GDK_BACKEND
+    MOZ_ENABLE_WAYLAND
+    ELECTRON_OZONE_PLATFORM_HINT
+    OZONE_PLATFORM
+    XCURSOR_SIZE
+    XCOMPOSEFILE
+    __GLX_VENDOR_LIBRARY_NAME
+    LIBVA_DRIVER_NAME
+    NVD_BACKEND
+    TERMINAL
+    EDITOR
+    INPUT_METHOD
+    QT_IM_MODULE
+    XMODIFIERS
+    SDL_IM_MODULE
+  )
+  local -a present=()
+  local v
+  for v in "${vars[@]}"; do
+    [[ -n ${!v:-} ]] && present+=("$v")
+  done
+  if (( ${#present[@]} > 0 )); then
+    command -v dbus-update-activation-environment >/dev/null 2>&1 && \
+      dbus-update-activation-environment --systemd "${present[@]}" >/dev/null 2>&1 || true
+    command -v systemctl >/dev/null 2>&1 && \
+      systemctl --user import-environment "${present[@]}" >/dev/null 2>&1 || true
+  fi
+}
+
+session_boot_marker="${XDG_RUNTIME_DIR:-/tmp}/quattro-dwl-boot-${QUATTRO_SESSION_ID:-${WAYLAND_DISPLAY:-default}}"
+if [[ ! -e $session_boot_marker ]]; then
+  : >"$session_boot_marker"
+  sync_session_environment
+  if command -v systemctl >/dev/null 2>&1 && [[ -n ${WAYLAND_DISPLAY:-} ]]; then
+    (
+      eval "exec ${launch_lock_fd}>&-"
+      systemctl --user restart xdg-desktop-portal-wlr.service >/dev/null 2>&1 || true
+      systemctl --user restart xdg-desktop-portal.service >/dev/null 2>&1 || true
+    ) &
+  fi
+  command -v fcitx5 >/dev/null 2>&1 && ! pgrep -x fcitx5 >/dev/null 2>&1 && (
+    eval "exec ${launch_lock_fd}>&-"
+    exec fcitx5 -d >/dev/null 2>&1
+  ) &
+  command -v quattro-provision-first-run >/dev/null 2>&1 && (
+    eval "exec ${launch_lock_fd}>&-"
+    exec quattro-provision-first-run >/dev/null 2>&1
+  ) &
+  command -v quattro-powerprofiles-init >/dev/null 2>&1 && (
+    eval "exec ${launch_lock_fd}>&-"
+    exec quattro-powerprofiles-init >/dev/null 2>&1
+  ) &
+  command -v quattro-hook >/dev/null 2>&1 && (
+    eval "exec ${launch_lock_fd}>&-"
+    exec quattro-hook post-boot >/dev/null 2>&1
+  ) &
+fi
+
+# Quickshell only logs to its instance runtime dir (tmpfs), so when the shell
+# dies the idle/lock event trail is gone after a reboot. The journal keeps it
+# across sessions, bounded and timestamped, under the quattro-shell tag.
+#
+# Backgrounded because bash defers a trap until a foreground command returns but
+# interrupts wait. systemd-cat execs, so the job is Quickshell itself.
+#
+# Quickshell's own reloading is off; Quattro restarts the shell deliberately.
+# A package upgrade rewriting $QUATTRO_PATH/shell would otherwise reload it
+# against a half-written tree, and that failed reload leaves a second engine
+# generation behind that turns the next restart's IPC kill into a crash.
+run_shell() {
+  local startup_background
+  startup_background=$(readlink -f "$HOME/.local/state/quattro/current/background" 2>/dev/null)
+  (
+    eval "exec ${launch_lock_fd}>&-"
+    exec env QUATTRO_STARTUP_BACKGROUND="$startup_background" QS_DISABLE_FILE_WATCHER=1 QS_NO_RELOAD_POPUP=1 \
+      systemd-cat -t quattro-shell -- quickshell -n -p "$QUATTRO_PATH/shell"
+  ) &
+  shell_pid=$!
+
+  local status
+  while true; do
+    wait "$shell_pid"
+    status=$?
+
+    # An interrupted wait and a shell killed by that signal report alike.
+    kill -0 "$shell_pid" 2>/dev/null || break
+  done
+
+  shell_pid=""
+  return $status
+}
+
+# A compositor busy reconfiguring outputs can miss a query without being gone,
+# and that is when the shell dies.
+compositor_alive() {
+  local attempt
+
+  for attempt in 1 2 3; do
+    if [[ -n ${WAYLAND_DISPLAY:-} ]] && pgrep -x dwl >/dev/null 2>&1; then
+      return 0
+    fi
+    (( attempt < 3 )) && sleep 0.5
+  done
+
+  return 1
+}
+
+# Quickshell relaunches itself from its signal handlers, but Qt leaves through
+# _exit() when the Wayland connection fails, raising no signal: no crash report,
+# no relaunch, no bar. Supervise those deaths. A clean exit is a deliberate stop
+# (quattro-restart-shell starts its own replacement); a signal here means the
+# session is going, and has to reach the shell the launcher used to exec.
+terminating=0
+shell_pid=""
+
+stop() {
+  terminating=1
+  [[ -n $shell_pid ]] && kill -TERM "$shell_pid" 2>/dev/null
+  return 0
+}
+trap stop HUP INT TERM
+
+attempts=0
+window_started=$SECONDS
+
+while true; do
+  # A signal during the backoff only reaches the trap once the sleep is over.
+  (( terminating )) && exit 0
+
+  run_shell
+  status=$?
+
+  (( terminating )) && exit 0
+  (( status == 0 )) && exit 0
+
+  # Relaunching into a session already tearing down burns the attempt budget.
+  compositor_alive || exit 0
+
+  if (( SECONDS - window_started > 60 )); then
+    attempts=0
+    window_started=$SECONDS
+  fi
+
+  if (( ++attempts > 5 )); then
+    logger -t quattro-shell "Giving up on the Quattro shell after $attempts relaunches in under a minute."
+    exit 1
+  fi
+
+  logger -t quattro-shell "Quattro shell exited with status $status; relaunching."
+  sleep 1
+done

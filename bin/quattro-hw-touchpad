@@ -1,0 +1,12 @@
+#!/bin/bash
+
+# quattro:summary=Print the detected touchpad or trackpad device name
+
+input_class="${QUATTRO_INPUT_CLASS_PATH:-/sys/class/input}"
+for event in "$input_class"/event*; do
+  [[ -r $event/device/name ]] || continue
+  if udevadm info --query=property "$event" 2>/dev/null | grep -Fxq 'ID_INPUT_TOUCHPAD=1'; then
+    <"$event/device/name" cat
+    exit 0
+  fi
+done

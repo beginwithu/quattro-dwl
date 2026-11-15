@@ -1,0 +1,151 @@
+#!/bin/bash
+
+set -euo pipefail
+
+PROJECT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+failures=0
+
+pass() { printf 'PASS: %s\n' "$1"; }
+fail() { printf 'FAIL: %s\n' "$1" >&2; failures=$((failures + 1)); }
+
+echo "==> 1. Checking Bash & Python script syntax..."
+script_errors=0
+while IFS= read -r -d '' script; do
+  shebang=$(head -n1 "$script" 2>/dev/null || true)
+  if [[ $shebang == *bash* || $script == "$PROJECT_DIR/default/bash/"* ]]; then
+    if ! bash -n "$script" 2>/dev/null; then
+      echo "  Bash syntax error in: $script" >&2
+      script_errors=$((script_errors + 1))
+    fi
+  elif [[ $shebang == *python* ]]; then
+    if ! python3 -c 'import ast,sys; ast.parse(open(sys.argv[1],"rb").read())' "$script" 2>/dev/null; then
+      echo "  Python syntax error in: $script" >&2
+      script_errors=$((script_errors + 1))
+    fi
+  fi
+done < <(find "$PROJECT_DIR/install.sh" "$PROJECT_DIR/verify.sh" "$PROJECT_DIR/bin" "$PROJECT_DIR/default/bash" -type f -print0)
+(( script_errors == 0 )) && pass "All Bash & Python scripts pass syntax checks" || fail "$script_errors script syntax error(s)"
+
+echo "==> 2. Building quattro-dwl-ipc & checking CLI metadata..."
+if command -v make >/dev/null 2>&1 && make -C "$PROJECT_DIR/src" clean all >/dev/null 2>&1 && "$PROJECT_DIR/bin/quattro-dwl-ipc" --help >/dev/null 2>&1; then
+  pass "quattro-dwl-ipc builds cleanly with zero warnings"
+else
+  fail "quattro-dwl-ipc build failed"
+fi
+
+if QUATTRO_PATH="$PROJECT_DIR" "$PROJECT_DIR/bin/quattro" commands --check >/dev/null 2>&1; then
+  pass "quattro CLI command metadata passes --check"
+else
+  fail "quattro CLI command metadata failed --check"
+fi
+
+if rg -n -i 'h''ypr' "$PROJECT_DIR" >/dev/null 2>&1; then
+  fail "Unexpected legacy compositor reference(s) remain in repository"
+else
+  pass "Zero remaining legacy compositor references in repository"
+fi
+
+echo "==> 3. Checking JSON configs..."
+json_errors=0
+for jf in \
+  "$PROJECT_DIR/config/quattro/shell.json" \
+  "$PROJECT_DIR/config/qtengine/config.json" \
+  "$PROJECT_DIR/etc/fastfetch/config.jsonc"; do
+  if ! python3 -m json.tool "$jf" >/dev/null 2>&1; then
+    echo "  Invalid JSON: $jf" >&2
+    json_errors=$((json_errors + 1))
+  fi
+done
+(( json_errors == 0 )) && pass "All JSON config files parse cleanly" || fail "$json_errors JSON error(s)"
+
+echo "==> 4. Verifying Arch repository package lists..."
+if command -v pacman >/dev/null 2>&1; then
+  missing=$(comm -23 \
+    <(grep -hvE '^[[:space:]]*(#|$)' "$PROJECT_DIR/packages/arch-core.packages" | sort -u) \
+    <(pacman -Ssq | sort -u))
+  if [[ -z $missing ]]; then
+    pass "All packages in arch-core.packages exist in pacman repos"
+  else
+    echo "$missing" | sed 's/^/  Missing package: /' >&2
+    fail "Some packages were not found in pacman sync DB"
+  fi
+else
+  echo "SKIP: pacman not found"
+fi
+
+echo "==> 5. Running isolated sandbox install & theme rendering test..."
+tmp_home=$(mktemp -d)
+trap 'rm -rf "$tmp_home"' EXIT
+
+if HOME="$tmp_home" XDG_CONFIG_HOME="$tmp_home/.config" XDG_DATA_HOME="$tmp_home/.local/share" XDG_STATE_HOME="$tmp_home/.local/state" \
+  QUATTRO_INSTALL_SANDBOX=1 "$PROJECT_DIR/install.sh" >/dev/null; then
+  pass "Sandbox install.sh succeeded"
+else
+  fail "Sandbox install.sh failed"
+fi
+
+expected_files=(
+  "$tmp_home/.bashrc"
+  "$tmp_home/.XCompose"
+  "$tmp_home/.config/dwl/config.toml"
+  "$tmp_home/.config/xdg-desktop-portal/wlroots-portals.conf"
+  "$tmp_home/.config/xdg-desktop-portal/dwl-portals.conf"
+  "$tmp_home/.config/xdg-desktop-portal-wlr/config"
+  "$tmp_home/.config/alacritty/alacritty.toml"
+  "$tmp_home/.config/kitty/kitty.conf"
+  "$tmp_home/.config/foot/foot.ini"
+  "$tmp_home/.config/ghostty/config"
+  "$tmp_home/.config/btop/btop.conf"
+  "$tmp_home/.config/btop/themes/current.theme"
+  "$tmp_home/.config/starship.toml"
+  "$tmp_home/.config/tmux/tmux.conf"
+  "$tmp_home/.config/chrome-flags.conf"
+  "$tmp_home/.config/chromium-flags.conf"
+  "$tmp_home/.local/share/quattro/bin/quattro"
+  "$tmp_home/.local/share/quattro/bin/quattro-dwl-ipc"
+  "$tmp_home/.local/share/quattro/libexec/quattro-dwl-ipc"
+  "$tmp_home/.local/bin/quattro"
+  "$tmp_home/.local/state/quattro/current/theme/colors.toml"
+  "$tmp_home/.local/state/quattro/current/theme/alacritty.toml"
+  "$tmp_home/.local/state/quattro/current/theme/kitty.conf"
+  "$tmp_home/.local/state/quattro/current/theme/foot.ini"
+  "$tmp_home/.local/state/quattro/current/theme/ghostty.conf"
+  "$tmp_home/.local/state/quattro/current/theme/btop.theme"
+  "$tmp_home/.local/state/quattro/current/theme/dwl-colors.h"
+  "$tmp_home/.local/state/quattro/current/theme/qtengine.colors"
+  "$tmp_home/.local/state/quattro/current/theme/shell.toml"
+  "$tmp_home/.local/state/quattro/current/theme/gtk.css"
+  "$tmp_home/.config/gtk-4.0/gtk.css"
+  "$tmp_home/.local/state/quattro/current/icons/org.gnome.Nautilus.svg"
+)
+
+missing_deployed=0
+for f in "${expected_files[@]}"; do
+  if [[ ! -e $f ]]; then
+    echo "  Missing deployed artifact: $f" >&2
+    missing_deployed=$((missing_deployed + 1))
+  fi
+done
+(( missing_deployed == 0 )) && pass "All expected configs and rendered theme files exist" || fail "$missing_deployed missing deployed file(s)"
+
+if grep -q '__QUATTRO_PATH__' "$tmp_home/.config/chromium-flags.conf" || grep -q '/usr/share/quattro' "$tmp_home/.config/chromium-flags.conf"; then
+  fail "chromium-flags.conf still contains unresolved path"
+else
+  pass "chromium-flags.conf extension paths resolved to sandbox QUATTRO_PATH"
+fi
+
+if [[ $(HOME="$tmp_home" QUATTRO_PATH="$tmp_home/.local/share/quattro" "$tmp_home/.local/bin/quattro-version-channel") == "arch-standalone" ]]; then
+  pass "quattro-version-channel reports arch-standalone"
+else
+  fail "quattro-version-channel output unexpected"
+fi
+
+if (( failures == 0 )); then
+  echo
+  echo "ALL CHECKS PASSED."
+  exit 0
+else
+  echo
+  echo "$failures CHECK(S) FAILED." >&2
+  exit 1
+fi

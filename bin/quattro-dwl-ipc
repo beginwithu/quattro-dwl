@@ -1,0 +1,27 @@
+#!/bin/bash
+# quattro:group=dwl
+# quattro:name=ipc
+# quattro:summary=Query and control dwl state over dwl-ipc-unstable-v2
+
+set -euo pipefail
+
+SCRIPT_PATH=$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")
+SCRIPT_DIR=$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd)
+ROOT_DIR=$(cd -- "$SCRIPT_DIR/.." && pwd)
+LIBEXEC_BIN="$ROOT_DIR/libexec/quattro-dwl-ipc"
+
+if [[ ! -x $LIBEXEC_BIN ]]; then
+  LIBEXEC_BIN="${XDG_DATA_HOME:-$HOME/.local/share}/quattro/libexec/quattro-dwl-ipc"
+fi
+
+if [[ ! -x $LIBEXEC_BIN && -d $ROOT_DIR/src ]]; then
+  make -s -C "$ROOT_DIR/src" >/dev/null
+  LIBEXEC_BIN="$ROOT_DIR/libexec/quattro-dwl-ipc"
+fi
+
+if [[ ! -x $LIBEXEC_BIN ]]; then
+  echo "quattro-dwl-ipc helper binary not built; run make -C src" >&2
+  exit 1
+fi
+
+exec "$LIBEXEC_BIN" "$@"

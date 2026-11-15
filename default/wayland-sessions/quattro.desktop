@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=Quattro (dwl)
+Comment=Quattro dwl Wayland compositor session
+Exec=quattro-dwl-session
+TryExec=quattro-dwl-session
+Type=Application
+DesktopNames=wlroots

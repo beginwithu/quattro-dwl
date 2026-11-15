@@ -1,0 +1,462 @@
+#!/usr/bin/env python3
+
+# quattro:summary=Interactive screen, window, workspace, and region share picker with previews
+
+import json
+import os
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+
+def resolve_quattro_path() -> str:
+    env_path = os.environ.get("QUATTRO_PATH", "").strip()
+    if env_path and Path(env_path, "shell").is_dir():
+        return env_path
+    script_root = Path(__file__).resolve().parent.parent
+    if (script_root / "shell").is_dir():
+        return str(script_root)
+    user_share = Path.home() / ".local" / "share" / "quattro"
+    if (user_share / "shell").is_dir():
+        return str(user_share)
+    return "/usr/share/quattro"
+
+
+def wlr_randr_json() -> list:
+    ipc_bin = shutil.which("quattro-dwl-ipc")
+    if not ipc_bin:
+        candidate = Path(resolve_quattro_path()) / "bin" / "quattro-dwl-ipc"
+        if candidate.is_file():
+            ipc_bin = str(candidate)
+    if not ipc_bin:
+        return []
+    try:
+        out = subprocess.check_output(
+            [ipc_bin, "--monitors"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=2,
+        )
+        data = json.loads(out)
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def dwl_ipc_once() -> dict:
+    ipc_bin = shutil.which("quattro-dwl-ipc")
+    if not ipc_bin:
+        candidate = Path(resolve_quattro_path()) / "bin" / "quattro-dwl-ipc"
+        if candidate.is_file():
+            ipc_bin = str(candidate)
+    if not ipc_bin:
+        return {}
+    try:
+        out = subprocess.check_output(
+            [ipc_bin, "--once"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=2,
+        )
+        data = json.loads(out)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _parse_len_prefixed_outputs(raw: str):
+    items = []
+    pos = 0
+    length = len(raw)
+    while pos < length:
+        while pos < length and (raw[pos].isspace() or raw[pos] == ";"):
+            pos += 1
+        if pos >= length:
+            break
+        colon = raw.find(":", pos)
+        if colon == -1:
+            return None
+        len_tok = raw[pos:colon]
+        if not len_tok.isdigit():
+            return None
+        name_len = int(len_tok)
+        name_start = colon + 1
+        name_end = name_start + name_len
+        if name_len <= 0 or name_end >= length or raw[name_end] != ":":
+            return None
+        name = raw[name_start:name_end]
+        semi = raw.find(";", name_end + 1)
+        geom_end = length if semi == -1 else semi
+        geom_parts = raw[name_end + 1 : geom_end].split(":")
+        if len(geom_parts) != 4:
+            return None
+        try:
+            x, y, w, h = (int(p) for p in geom_parts)
+        except ValueError:
+            return None
+        items.append({
+            "name": name,
+            "description": "",
+            "x": x,
+            "y": y,
+            "width": w,
+            "height": h,
+        })
+        pos = length if semi == -1 else semi + 1
+    return items if items else None
+
+
+def _current_mode(mon: dict) -> tuple[int, int]:
+    modes = mon.get("modes") or []
+    for mode in modes:
+        if mode.get("current"):
+            return int(mode.get("width") or 0), int(mode.get("height") or 0)
+    if modes:
+        return int(modes[0].get("width") or 0), int(modes[0].get("height") or 0)
+    return 0, 0
+
+
+def parse_outputs(raw: str) -> list:
+    wlr_monitors = [mon for mon in wlr_randr_json() if mon.get("enabled", True)]
+    wlr_by_name = {
+        str(mon.get("name")): mon
+        for mon in wlr_monitors
+        if mon.get("name")
+    }
+
+    items = _parse_len_prefixed_outputs(raw) if raw else None
+    if items is None:
+        items = []
+        for chunk in raw.split(";"):
+            chunk = chunk.strip()
+            if not chunk:
+                continue
+            parts = chunk.split(":")
+            if len(parts) >= 6:
+                name = parts[0]
+                try:
+                    x, y, w, h = int(parts[-4]), int(parts[-3]), int(parts[-2]), int(parts[-1])
+                    desc = ":".join(parts[1:-4])
+                except ValueError:
+                    desc = ":".join(parts[1:])
+                    x = y = w = h = 0
+            elif len(parts) == 5:
+                name = parts[0]
+                desc = ""
+                try:
+                    x, y, w, h = int(parts[1]), int(parts[2]), int(parts[3]), int(parts[4])
+                except ValueError:
+                    desc = ":".join(parts[1:])
+                    x = y = w = h = 0
+            elif len(parts) >= 2:
+                name = parts[0]
+                desc = ":".join(parts[1:])
+                x = y = w = h = 0
+            else:
+                name = chunk
+                desc = ""
+                x = y = w = h = 0
+            if name:
+                items.append({
+                    "name": name,
+                    "description": desc,
+                    "x": x,
+                    "y": y,
+                    "width": w,
+                    "height": h,
+                })
+
+    if items:
+        for item in items:
+            mon = wlr_by_name.get(item["name"])
+            if mon:
+                if not item["description"]:
+                    item["description"] = str(mon.get("description") or "")
+                if item["width"] <= 0 or item["height"] <= 0:
+                    mw, mh = _current_mode(mon)
+                    item["width"] = mw or item["width"]
+                    item["height"] = mh or item["height"]
+        return items
+
+    for mon in wlr_monitors:
+        name = str(mon.get("name") or "")
+        if name:
+            pos = mon.get("position") or {}
+            mw, mh = _current_mode(mon)
+            items.append({
+                "name": name,
+                "description": str(mon.get("description") or name),
+                "x": int(pos.get("x") or 0),
+                "y": int(pos.get("y") or 0),
+                "width": mw,
+                "height": mh,
+            })
+    return items
+
+
+def parse_windows(raw: str) -> list:
+    items = []
+    pos = 0
+    length = len(raw)
+    while pos < length:
+        hc = raw.find("[HC>]", pos)
+        if hc == -1:
+            break
+        win_id = raw[pos:hc]
+        ht = raw.find("[HT>]", hc + 5)
+        if ht == -1:
+            break
+        app_class = raw[hc + 5 : ht]
+        he = raw.find("[HE>]", ht + 5)
+        if he == -1:
+            break
+        title = raw[ht + 5 : he]
+        after_he = he + 5
+        next_hc = raw.find("[HC>]", after_he)
+        ha = raw.find("[HA>]", after_he)
+        if ha != -1 and (next_hc == -1 or ha < next_hc):
+            address = raw[after_he:ha]
+            pos = ha + 5
+        else:
+            address = ""
+            pos = after_he
+        if win_id:
+            items.append({
+                "id": win_id,
+                "appClass": app_class,
+                "title": title,
+                "address": address,
+            })
+
+    if items or raw:
+        return items
+
+    state = dwl_ipc_once()
+    for out in state.get("outputs") or []:
+        title = str(out.get("title") or "")
+        app_id = str(out.get("appId") or "")
+        mon_name = str(out.get("name") or "")
+        if not (title or app_id):
+            continue
+        items.append({
+            "id": mon_name,
+            "appClass": app_id,
+            "title": title,
+            "address": mon_name,
+        })
+    return items
+
+
+def parse_workspaces(raw: str) -> list:
+    items = []
+    for chunk in raw.split("[HE>]"):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        if "[HN>]" in chunk:
+            ws_id, rest = chunk.split("[HN>]", 1)
+            before_hm = rest.split("[HM>]", 1)[0]
+            ws_name = before_hm.split(":", 1)[0] if ":" in before_hm else before_hm
+            after_hm = rest.split("[HM>]", 1)[1] if "[HM>]" in rest else ""
+            monitor = after_hm.split(":", 1)[0] if after_hm else ""
+        elif ":" in chunk:
+            ws_id, ws_name = chunk.split(":", 1)
+            monitor = ""
+        else:
+            ws_id = chunk
+            ws_name = chunk
+            monitor = ""
+        items.append({
+            "id": ws_id,
+            "name": ws_name or ws_id,
+            "monitor": monitor,
+        })
+
+    if items or raw:
+        return items
+
+    state = dwl_ipc_once()
+    for out in state.get("outputs") or []:
+        mon_name = str(out.get("name") or "")
+        for tag in out.get("tags") or []:
+            tag_id = tag.get("id")
+            if tag_id is None:
+                continue
+            items.append({
+                "id": str(tag_id),
+                "name": str(tag.get("name") or tag_id),
+                "monitor": mon_name,
+            })
+    return items
+
+
+def parse_args(argv: list) -> tuple[bool, bool]:
+    allow_token = False
+    dmenu_mode = False
+    for arg in argv:
+        if arg in ("-h", "--help"):
+            print("Usage: quattro-share-picker [--allow-token] [--dmenu]")
+            sys.exit(0)
+        if arg == "--allow-token":
+            allow_token = True
+        if arg == "--dmenu":
+            dmenu_mode = True
+    return allow_token, dmenu_mode
+
+
+def parse_xdpw_dmenu_stdin() -> tuple[list, list]:
+    wlr_monitors = [mon for mon in wlr_randr_json() if mon.get("enabled", True)]
+    wlr_by_name = {
+        str(mon.get("name")): mon
+        for mon in wlr_monitors
+        if mon.get("name")
+    }
+    outputs = []
+    windows = []
+    raw_text = "" if sys.stdin.isatty() else sys.stdin.read()
+    for raw_line in raw_text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("Monitor:"):
+            body = line[len("Monitor:"):].strip()
+            parts = body.split(None, 1)
+            name = parts[0] if parts else ""
+            desc = parts[1].strip() if len(parts) > 1 else ""
+            if not name:
+                continue
+            mon = wlr_by_name.get(name) or {}
+            pos = mon.get("position") or {}
+            mw, mh = _current_mode(mon) if mon else (0, 0)
+            outputs.append({
+                "name": name,
+                "description": desc or str(mon.get("description") or name),
+                "x": int(pos.get("x") or 0),
+                "y": int(pos.get("y") or 0),
+                "width": mw,
+                "height": mh,
+                "rawLine": line,
+            })
+        elif line.startswith("Window:"):
+            body = line[len("Window:"):].strip()
+            m = re.match(r"^(.*?)\s+\(([^()]+)\)$", body)
+            if m:
+                title, win_id = m.group(1).strip(), m.group(2).strip()
+            else:
+                title, win_id = body, body
+            windows.append({
+                "id": win_id,
+                "appClass": "",
+                "title": title or win_id,
+                "address": win_id,
+                "rawLine": line,
+            })
+    return outputs, windows
+
+
+def main() -> int:
+    allow_token, dmenu_mode = parse_args(sys.argv[1:])
+    quattro_path = resolve_quattro_path()
+    os.environ["QUATTRO_PATH"] = quattro_path
+
+    if dmenu_mode:
+        outputs, windows = parse_xdpw_dmenu_stdin()
+        workspaces = []
+        use_workspace_id = False
+        if not outputs and not windows:
+            return 1
+    else:
+        outputs = parse_outputs(os.environ.get("XDPH_OUTPUT_SHARING_LIST", ""))
+        windows = parse_windows(os.environ.get("XDPH_WINDOW_SHARING_LIST", ""))
+        workspaces = parse_workspaces(os.environ.get("XDPH_WORKSPACE_SHARING_LIST", ""))
+        use_workspace_id = bool(
+            os.environ.get("XDPH_WORKSPACE_SHARING_LIST_V2")
+            or os.environ.get("XDPH_WORKSPACE_SHARING_LIST_V3")
+        )
+
+    tmp_dir = tempfile.mkdtemp(prefix="quattro-share-picker-")
+    selection_file = os.path.join(tmp_dir, "selection")
+    done_file = os.path.join(tmp_dir, "done")
+    standalone_proc = None
+
+    def cleanup_remote():
+        if standalone_proc is not None and standalone_proc.poll() is None:
+            standalone_proc.terminate()
+            return
+        quattro_shell_bin = os.path.join(quattro_path, "bin", "quattro-shell")
+        if os.path.isfile(quattro_shell_bin):
+            subprocess.run(
+                [quattro_shell_bin, "-q", "shell", "hide", "quattro.share-picker"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=2,
+            )
+
+    def handle_signal(_signum, _frame):
+        cleanup_remote()
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        sys.exit(1)
+
+    signal.signal(signal.SIGTERM, handle_signal)
+    signal.signal(signal.SIGINT, handle_signal)
+
+    payload = json.dumps({
+        "allowToken": allow_token,
+        "useWorkspaceId": use_workspace_id,
+        "dmenuMode": dmenu_mode,
+        "selectionFile": selection_file,
+        "doneFile": done_file,
+        "outputs": outputs,
+        "windows": windows,
+        "workspaces": workspaces,
+    }, separators=(",", ":"))
+
+    try:
+        quattro_shell_bin = os.path.join(quattro_path, "bin", "quattro-shell")
+        summoned = False
+        if os.path.isfile(quattro_shell_bin):
+            res = subprocess.run(
+                [quattro_shell_bin, "shell", "summon", "quattro.share-picker", payload],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=3,
+            )
+            summoned = res.returncode == 0
+
+        if summoned:
+            while not os.path.exists(done_file):
+                time.sleep(0.025)
+        else:
+            standalone_qml = os.path.join(quattro_path, "shell", "share-picker.qml")
+            if shutil.which("quickshell") and os.path.isfile(standalone_qml):
+                env = os.environ.copy()
+                env["QUATTRO_SHARE_PICKER_PAYLOAD"] = payload
+                standalone_proc = subprocess.Popen(
+                    ["quickshell", "-p", standalone_qml],
+                    env=env,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                standalone_proc.wait()
+            else:
+                print("[XDPH_PICKER_ERROR] No share picker backend available", file=sys.stderr)
+                return 1
+
+        if os.path.isfile(selection_file):
+            result = Path(selection_file).read_text(encoding="utf-8").strip()
+            if result:
+                sys.stdout.write(result + "\n")
+                sys.stdout.flush()
+                return 0
+        return 1
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

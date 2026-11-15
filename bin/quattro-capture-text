@@ -1,0 +1,16 @@
+#!/bin/bash
+
+# quattro:summary=Extract text from a screenshot region with OCR
+# quattro:group=capture
+# quattro:examples=quattro capture text
+
+SELECTION=$(slurp 2>/dev/null)
+
+[[ -z $SELECTION ]] && exit 0
+
+TEXT=$(grim -g "$SELECTION" - | tesseract stdin stdout --oem 1 --psm 6 -l "${QUATTRO_OCR_LANGS:-eng}" --dpi 300 -c preserve_interword_spaces=1 2>/dev/null) || exit 1
+
+[[ -z $TEXT ]] && exit 1
+
+printf "%s" "$TEXT" | wl-copy
+quattro-notification-send -g 󰴑 "$(quattro-i18n capture.textCopied)"
